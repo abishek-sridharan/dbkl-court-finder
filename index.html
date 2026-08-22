@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>DBKL Court Finder</title>
+    <meta name="description" content="Live badminton, futsal and sports court availability across 59+ DBKL facilities in Kuala Lumpur. Filter by consecutive hours, time window and distance." />
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+    <meta property="og:title" content="DBKL Court Finder" />
+    <meta property="og:description" content="Live sports court availability across DBKL facilities in Kuala Lumpur." />
+    <meta property="og:type" content="website" />
+    <!-- The whole page is gated on this host, and the first request only starts
+         once the bundle boots — warm the connection while the JS downloads.
+         crossorigin is required for CORS-mode fetch() to reuse the connection. -->
+    <link rel="preconnect" href="https://apihub.dbkl.gov.my" crossorigin />
+    <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />

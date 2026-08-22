@@ -12,7 +12,7 @@ interface CourtRowProps {
   bookingUrl?: string;
 }
 
-export function CourtRow({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, showVenueColumn, bookingUrl }: CourtRowProps) {
+function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, showVenueColumn, bookingUrl }: CourtRowProps) {
   /*
     The API sometimes returns overlapping slot records for the same time window
     (e.g. both a 1-hour "6–7 PM" slot AND a 2-hour "6–8 PM" slot).
@@ -77,3 +77,26 @@ export function CourtRow({ venueName, slots, isDimmed, timeSlotIds, venueColWidt
     </div>
   );
 }
+
+/*
+  An all-locations sweep re-renders this component once per batch of venues, and
+  each render walks ~16 columns and rebuilds every SlotCell below it — across 60+
+  venues that is thousands of cells redrawn for a handful of new rows.
+
+  timeSlotIds is rebuilt from `courts` on every batch, so it needs comparing by
+  content; the remaining props are primitives or arrays that keep their identity.
+  Props are listed explicitly, so anything added to CourtRowProps must be added
+  here too.
+*/
+export const CourtRow = React.memo(CourtRowImpl, (prev, next) => {
+  if (prev.timeSlotIds.length !== next.timeSlotIds.length) return false;
+  if (prev.timeSlotIds.some((id, i) => id !== next.timeSlotIds[i])) return false;
+  return (
+    prev.venueName === next.venueName &&
+    prev.slots === next.slots &&
+    prev.isDimmed === next.isDimmed &&
+    prev.venueColWidth === next.venueColWidth &&
+    prev.showVenueColumn === next.showVenueColumn &&
+    prev.bookingUrl === next.bookingUrl
+  );
+});

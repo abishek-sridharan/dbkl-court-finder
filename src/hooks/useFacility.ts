@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { readFacility, writeFacility } from '../utils/facilityCache';
 import type { LocationFacility, SportCategory } from '../types';
 
 interface UseFacilityReturn {
@@ -25,14 +26,24 @@ export function useFacility(
       return;
     }
 
+    const target = `${locationId}|${date}|${sport}`;
+    const targetChanged = lastTargetRef.current !== target;
+    lastTargetRef.current = target;
+
+    // The all-locations sweep caches every venue it loads, so picking one from
+    // the list usually needs no request at all.
+    const cached = readFacility(sport, date, locationId);
+    if (cached) {
+      setCourts(cached);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     // Drop the previous venue's rows as soon as the target changes, so its
     // availability is never on screen under a different venue's name. A refresh
     // of the same target keeps its rows rather than flashing the loading state.
-    const target = `${locationId}|${date}|${sport}`;
-    if (lastTargetRef.current !== target) {
-      lastTargetRef.current = target;
-      setCourts([]);
-    }
+    if (targetChanged) setCourts([]);
 
     // Each effect invocation gets its own cancelled flag so a slow response for
     // a previous venue can never overwrite the current one's courts.
@@ -55,7 +66,11 @@ export function useFacility(
 
         // An empty or unsuccessful payload means this venue has nothing to show —
         // keeping the previous courts would misattribute them to this venue.
-        setCourts(data.success && data.data?.data ? data.data.data : []);
+        const fetched = (data.success && data.data?.data
+          ? data.data.data
+          : []) as LocationFacility[];
+        writeFacility(sport, date, locationId, fetched);
+        setCourts(fetched);
       } catch (err) {
         if (!cancelled) {
           setCourts([]);

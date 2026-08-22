@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { LocationFacilityTime } from '../utils/consecutiveSlots';
 
 interface SlotCellProps {
@@ -7,7 +7,9 @@ interface SlotCellProps {
   bookingUrl?: string;
 }
 
-export function SlotCell({ slot, columnSpan, bookingUrl }: SlotCellProps) {
+// Memoised alongside CourtRow — these are the ~4,600 cells that would otherwise
+// re-render on every batch of venues that lands.
+export const SlotCell = memo(function SlotCell({ slot, columnSpan, bookingUrl }: SlotCellProps) {
   const [showTooltip, setShowTooltip] = useState(false);
 
   const baseClass =
@@ -55,4 +57,4 @@ export function SlotCell({ slot, columnSpan, bookingUrl }: SlotCellProps) {
       </div>
     </div>
   );
-}
+});

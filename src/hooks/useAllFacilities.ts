@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { readFacility, writeFacility } from '../utils/facilityCache';
 import type { LocationFacility, LocationData, SportCategory } from '../types';
 
 interface LocationCourtGroup {
@@ -45,24 +46,51 @@ export function useAllFacilities(
     // the second invocation would reset the flag, allowing the first (stale)
     // async loop to continue appending results alongside the second one.
     let cancelled = false;
-    let processed = 0;
     let failed = 0;
 
-    const fetchAllFacilities = async () => {
+    // Serve everything already cached before touching the network, so returning
+    // to a date visited moments ago renders instantly instead of replaying the
+    // whole multi-minute sweep behind a progress bar.
+    const groups: LocationCourtGroup[] = [];
+    const pending: LocationData[] = [];
+    locations.forEach(loc => {
+      const cached = readFacility(sport, date, loc.location_id);
+      if (cached) {
+        groups.push({
+          location_id: loc.location_id,
+          location_name: loc.location_name,
+          courts: cached,
+        });
+      } else {
+        pending.push(loc);
+      }
+    });
+
+    const publish = () => {
+      setResults([...groups]);
+      setLoadedCount(groups.length);
+      setProgress(Math.round((groups.length / locations.length) * 100));
+    };
+
+    setError(null);
+    setFailedCount(0);
+    publish();
+
+    if (pending.length === 0) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchPending = async () => {
       try {
         setLoading(true);
-        setProgress(0);
-        setLoadedCount(0);
-        setFailedCount(0);
-        setResults([]);
-        setError(null);
 
         const batchSize = 10;
 
-        for (let i = 0; i < locations.length; i += batchSize) {
+        for (let i = 0; i < pending.length; i += batchSize) {
           if (cancelled) break;
 
-          const batch = locations.slice(i, i + batchSize);
+          const batch = pending.slice(i, i + batchSize);
 
           // One location's failure must not reject the batch, but it is tracked
           // rather than swallowed: an unreachable venue looks exactly like a
@@ -76,14 +104,20 @@ export function useAllFacilities(
                 if (!res.ok) throw new Error(`API error: ${res.status}`);
                 return res.json();
               })
-              .then(data => ({
-                failed: false,
-                group: {
-                  location_id: loc.location_id,
-                  location_name: loc.location_name,
-                  courts: (data.success && data.data?.data ? data.data.data : []) as LocationFacility[],
-                },
-              }))
+              .then(data => {
+                const courts = (data.success && data.data?.data
+                  ? data.data.data
+                  : []) as LocationFacility[];
+                writeFacility(sport, date, loc.location_id, courts);
+                return {
+                  failed: false,
+                  group: {
+                    location_id: loc.location_id,
+                    location_name: loc.location_name,
+                    courts,
+                  },
+                };
+              })
               .catch(() => ({
                 failed: true,
                 group: {
@@ -97,22 +131,23 @@ export function useAllFacilities(
           const batchResults = await Promise.all(batchPromises);
 
           if (!cancelled) {
-            setResults(prev => [...prev, ...batchResults.map(r => r.group)]);
-            processed += batchResults.length;
+            batchResults.forEach(r => groups.push(r.group));
             failed += batchResults.filter(r => r.failed).length;
-            setLoadedCount(processed);
             setFailedCount(failed);
-            setProgress(Math.round((processed / locations.length) * 100));
+            publish();
           }
 
-          if (i + batchSize < locations.length) {
+          if (i + batchSize < pending.length) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
         }
 
         if (!cancelled) {
           setProgress(100);
-          if (processed > 0 && failed === processed) {
+          // Only a total wipeout is a hard error. If anything was served from
+          // cache there is still a usable view, and the partial-failure notice
+          // says so rather than replacing it with an error card.
+          if (failed === locations.length) {
             setError('Could not reach the DBKL booking service. Check your connection and try again.');
           }
         }
@@ -127,7 +162,7 @@ export function useAllFacilities(
       }
     };
 
-    fetchAllFacilities();
+    fetchPending();
 
     return () => {
       cancelled = true;

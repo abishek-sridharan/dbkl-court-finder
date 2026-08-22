@@ -51,7 +51,12 @@ App.tsx (state)
 - `distance.ts` — Haversine formula with a 2× road correction factor; `isValidMalaysiaCoord()` for coordinate validation
 - `geocoding.ts` — Nominatim integration for coordinate lookup by location name
 
-**Caching strategy:** Location list is kept in module-level state (no re-fetch). Location coordinates and parliament names are cached in localStorage under `dbkl_location_details_v3` as `{ detail, fetchedAt }` entries — successes expire after 30 days, failed lookups after 24 hours so a transient geocoding failure does not disable a venue's distance permanently. Court availability itself is not cached; it is re-fetched on every filter change.
+**Caching strategy:**
+- Location list is kept in module-level state (no re-fetch)
+- Court availability goes through `src/utils/facilityCache.ts`, a module-level `Map` keyed by `sport|date|location_id` with a 10-minute TTL, read and written by **both** `useFacility` and `useAllFacilities` so the two never fetch the same venue twice. Deliberately not persisted — stale bookings across sessions would be worse than a refetch. The refresh button calls `clearFacilityCache()` before bumping `refreshKey`; without that it would re-serve the same cached data and appear to do nothing
+- Location coordinates and parliament names are cached in localStorage under `dbkl_location_details_v3` as `{ detail, fetchedAt }` entries — successes expire after 30 days, failed lookups after 24 hours so a transient geocoding failure does not disable a venue's distance permanently
+
+**Performance notes:** DBKL's API throttles concurrent requests hard — individual requests take seconds under the 10-per-batch sweep, and a full 59-location sweep takes minutes, not seconds. That makes avoiding a request far more valuable here than on a typical API, and it is why the TTL above is measured in minutes. `CourtRow` and `SlotCell` are memoised because a sweep produces ~20 state updates and the grid is roughly 4,600 cells; `CourtRow` uses an explicit comparator because `timeSlotIds` is rebuilt on every batch, so any prop added to `CourtRowProps` must be added to that comparator too.
 
 ## Conventions
 
