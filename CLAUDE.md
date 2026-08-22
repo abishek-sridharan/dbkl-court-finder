@@ -7,10 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install        # Install dependencies
 npm run dev        # Development server at localhost:5173
-npm run build      # Production build to dist/
+npm run typecheck  # TypeScript check only (tsc --build, no emit)
+npm run build      # Type-check, then production build to dist/
 npm run preview    # Preview production build
 npm run lint       # ESLint checks
 ```
+
+`npm run build` runs `tsc --build` first, so a type error fails the build before Vite runs. Vite itself only transpiles and would not catch one.
 
 No test framework is configured in this project.
 
@@ -26,7 +29,8 @@ This is a React 19 + TypeScript SPA built with Vite 7 and Tailwind CSS 4. It fet
 - `useAllFacilities` — batch-fetches all locations (10 at a time, 200ms delay) with progress tracking
 - `useLocationDetails` — fetches lat/lng and parliament info per location (localStorage-cached)
 - `useUserLocation` — browser geolocation, runs once at mount
-- `useGeocode` — Nominatim fallback when DBKL coordinates are invalid
+
+Nominatim geocoding is not a hook: `useLocationDetails` calls `geocodeByName()` from `src/utils/geocoding.ts` directly, as a fallback when a venue's DBKL coordinates fail validation.
 
 **External APIs:**
 - `https://apihub.dbkl.gov.my/api/public/v1/location/getCategoryByLocation` — location list

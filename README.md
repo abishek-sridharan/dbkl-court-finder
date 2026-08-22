@@ -81,7 +81,8 @@ The app will be available at `http://localhost:5173/`.
 
 ```bash
 npm run dev        # Development server with HMR
-npm run build      # Production build to dist/
+npm run typecheck  # TypeScript check only (tsc --build, no emit)
+npm run build      # Type-check, then production build to dist/
 npm run preview    # Preview the production build locally
 npm run lint       # Run ESLint checks
 ```
@@ -104,11 +105,12 @@ src/
 │   ├── useAllFacilities.ts  # Batch-fetches all locations (10 at a time, 200ms delay)
 │   ├── useLocationDetails.ts # Fetches lat/lng and parliament info per location (localStorage-cached)
 │   ├── useUserLocation.ts   # Browser geolocation (runs once at mount)
-│   ├── useGeocode.ts        # Nominatim fallback when DBKL coordinates are invalid
 │   ├── useTheme.ts          # Dark/light mode state synced to localStorage and DOM
 │   └── useMediaQuery.ts     # Reactive CSS media query hook
 ├── utils/
-│   ├── consecutiveSlots.ts  # TIME_ORDER array (8 AM → 12 AM), hasConsecutiveSlotsInRange()
+│   ├── consecutiveSlots.ts  # TIME_ORDER (8 AM → 12 AM), per-hour availability and filtering
+│   ├── facilityCache.ts     # Session cache of court availability, shared by both fetch hooks
+│   ├── date.ts              # Local-timezone YYYY-MM-DD helpers (never toISOString)
 │   ├── distance.ts          # Haversine formula (2× road factor), isValidMalaysiaCoord()
 │   └── geocoding.ts         # Nominatim integration for coordinate lookup by name
 └── index.css                # Tailwind imports and global styles
@@ -124,18 +126,19 @@ All filter state (`sport`, `date`, `locationId`, `nearMeOnly`, `minConsecutiveSl
 
 1. **Locations load** — `useLocations` fetches all DBKL locations filtered by the selected sport category
 2. **Batch fetch** — `useAllFacilities` fetches court data for all locations in batches of 10 with a 200ms inter-batch delay, reporting progress
-3. **Geolocation** — `useUserLocation` gets the user's position; `useLocationDetails` fetches each venue's coordinates; `useGeocode` fills in missing coordinates via Nominatim
+3. **Geolocation** — `useUserLocation` gets the user's position; `useLocationDetails` fetches each venue's coordinates, falling back to Nominatim via `geocodeByName()` when DBKL's coordinates fail validation
 4. **Filter & sort** — `App.tsx` filters results by consecutive slots, time range, minimum courts, proximity, and selected location — then sorts by distance
 5. **Render** — `TimelineView` displays the filtered venues with `CourtRow` and `SlotCell` components
 
 ### Caching Strategy
 
-| Data                 | Cache Location                     | Lifetime              |
-| -------------------- | ---------------------------------- | --------------------- |
-| Location list        | Module-level variable              | Session (no re-fetch) |
-| Location coordinates | `localStorage`                     | Persistent            |
-| Geocoding results    | `localStorage`                     | Persistent            |
-| Court availability   | None (re-fetched on filter change) | Per request           |
+| Data                            | Cache location                            | Lifetime                                     |
+| ------------------------------- | ----------------------------------------- | -------------------------------------------- |
+| Location list                   | Module-level variable                     | Session (no re-fetch)                        |
+| Court availability              | Module-level `Map` (`facilityCache.ts`)   | 10 minutes, or until Refresh clears it       |
+| Location coordinates + geocodes | `localStorage` (`dbkl_location_details_v3`) | 30 days; 24 hours for a failed lookup        |
+
+Court availability is shared by `useFacility` and `useAllFacilities`, so the two never fetch the same venue twice — switching between a single venue and all locations, or back to a date visited minutes ago, costs no requests at all. It is deliberately not persisted: stale bookings surviving across sessions would be worse than a re-fetch. The refresh button clears this cache before re-fetching.
 
 ## API Integration
 

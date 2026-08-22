@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# TypeScript incremental build cache (written by `tsc --build`)
+*.tsbuildinfo
+
 # Claude Code
 .claude/
 
