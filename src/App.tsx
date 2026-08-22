@@ -9,10 +9,10 @@ import { useAllFacilities } from './hooks/useAllFacilities';
 import { useUserLocation } from './hooks/useUserLocation';
 import { useLocationDetails } from './hooks/useLocationDetails';
 import { useMediaQuery } from './hooks/useMediaQuery';
-import { haversineKm, formatDistance } from './utils/distance';
+import { haversineKm, formatDistance, roadDistanceKm } from './utils/distance';
 import { todayLocalIso } from './utils/date';
 import { clearFacilityCache } from './utils/facilityCache';
-import { TIME_ORDER } from './utils/consecutiveSlots';
+import { HOUR_COUNT, timeIndex } from './utils/consecutiveSlots';
 import { SPORT_OPTIONS } from './types';
 import type { SportCategory } from './types';
 import { Analytics } from '@vercel/analytics/react';
@@ -38,31 +38,34 @@ function App() {
   const [timeRangeStart, setTimeRangeStart] = useState<string | null>(null);
   const [timeRangeEnd, setTimeRangeEnd] = useState<string | null>(null);
 
-  // Wrappers that auto-sync minConsecutiveSlots when the time range changes.
-  const handleTimeRangeStartChange = useCallback(
-    (start: string | null) => {
-      setTimeRangeStart(start);
-      if (start && timeRangeEnd) {
-        const span = TIME_ORDER.indexOf(timeRangeEnd) - TIME_ORDER.indexOf(start);
-        if (span > 0) setMinConsecutiveSlots(span);
-      } else if (!start && !timeRangeEnd) {
-        setMinConsecutiveSlots(1);
-      }
-    },
-    [timeRangeEnd],
-  );
+  /*
+    The time range moves as one value, not two.
 
-  const handleTimeRangeEndChange = useCallback(
-    (end: string | null) => {
+    Both endpoints often change in a single tap — picking an earlier end swaps
+    them, clearing resets both — and when they were separate setters each one
+    read the other from the render it was created in. So "Clear" never reset the
+    minimum-hours filter (each setter still saw the other endpoint as set), and
+    selecting the endpoints in reverse order skipped the sync entirely. Taking
+    both values at once removes the stale read, and with it that whole class of
+    bug.
+  */
+  const handleTimeRangeChange = useCallback(
+    (start: string | null, end: string | null) => {
+      setTimeRangeStart(start);
       setTimeRangeEnd(end);
-      if (timeRangeStart && end) {
-        const span = TIME_ORDER.indexOf(end) - TIME_ORDER.indexOf(timeRangeStart);
-        if (span > 0) setMinConsecutiveSlots(span);
-      } else if (!timeRangeStart && !end) {
+
+      if (start && end) {
+        // A closed window states the intent outright: play the whole span.
+        const span = timeIndex(end) - timeIndex(start);
+        if (span > 0) setMinConsecutiveSlots(Math.min(span, HOUR_COUNT));
+      } else if (!start && !end) {
         setMinConsecutiveSlots(1);
       }
+      // A lone start leaves the minimum alone — there is no span to read from
+      // it, and silently rewriting the user's number would be worse than
+      // leaving it.
     },
-    [timeRangeStart],
+    [],
   );
 
   // Refresh must drop the cache first, or the refetch would just serve the same
@@ -72,7 +75,7 @@ function App() {
     setRefreshKey(k => k + 1);
   }, []);
 
-  const { locations, loading: locationsLoading } = useLocations(sport);
+  const { locations, loading: locationsLoading, error: locationsError } = useLocations(sport);
 
   const isAllLocations = locationId === '';
   const singleFacility = useFacility(isAllLocations ? null : locationId, date, sport, refreshKey);
@@ -91,8 +94,15 @@ function App() {
     return singleFacility.courts;
   }, [isAllLocations, singleFacility.courts, allFacilities.results]);
 
-  const courtsLoading = isAllLocations ? allFacilities.loading : singleFacility.loading;
-  const courtsError = isAllLocations ? allFacilities.error : singleFacility.error;
+  // Count the venue-list fetch as loading too. Without it the all-locations hook
+  // has nothing to work with yet and reports "not loading", so the "no courts
+  // found" empty state flashes before the list has even arrived.
+  const courtsLoading =
+    locationsLoading || (isAllLocations ? allFacilities.loading : singleFacility.loading);
+  // A failed venue list leaves every other request with nothing to ask for, so
+  // it has to surface — otherwise it reads as "no courts match your filters".
+  const courtsError =
+    locationsError ?? (isAllLocations ? allFacilities.error : singleFacility.error);
   const allLocationsProgress = isAllLocations ? allFacilities.progress : 0;
   const loadedCount = isAllLocations ? allFacilities.loadedCount : 0;
   const totalCount = isAllLocations ? allFacilities.totalCount : 0;
@@ -107,7 +117,10 @@ function App() {
 
   // Rich distance map keyed by location_id
   const distances = useMemo(() => {
-    const distMap = new Map<string, { formatted: string; km: number; lat: number; lng: number }>();
+    const distMap = new Map<
+      string,
+      { formatted: string; km: number; roadKm: number; lat: number; lng: number }
+    >();
     if (!userLocation.coords) return distMap;
     locationDetails.forEach((detail, locId) => {
       if (Number.isFinite(detail.lat) && Number.isFinite(detail.lng)) {
@@ -117,18 +130,26 @@ function App() {
           detail.lat,
           detail.lng
         );
-        distMap.set(locId, { formatted: formatDistance(km), km, lat: detail.lat, lng: detail.lng });
+        distMap.set(locId, {
+          formatted: formatDistance(km),
+          km,
+          roadKm: roadDistanceKm(km),
+          lat: detail.lat,
+          lng: detail.lng,
+        });
       }
     });
     return distMap;
   }, [userLocation.coords, locationDetails]);
 
-  // Near-me filtering: only show locations within NEAR_ME_MAX_KM
+  // Near-me filtering: keep venues whose *displayed* distance is within
+  // NEAR_ME_MAX_KM. Comparing the raw straight-line value instead let a venue
+  // badged ~19 km count as nearby, since the badge is road-corrected.
   const nearMeLocationIds = useMemo(() => {
     if (!nearMeOnly || distances.size === 0) return null;
     const ids = new Set<string>();
     distances.forEach((d, locId) => {
-      if (d.km <= NEAR_ME_MAX_KM) ids.add(locId);
+      if (d.roadKm <= NEAR_ME_MAX_KM) ids.add(locId);
     });
     return ids;
   }, [nearMeOnly, distances]);
@@ -210,9 +231,8 @@ function App() {
           minCourtsNeeded={minCourtsNeeded}
           onMinCourtsChange={setMinCourtsNeeded}
           timeRangeStart={timeRangeStart}
-          onTimeRangeStartChange={handleTimeRangeStartChange}
           timeRangeEnd={timeRangeEnd}
-          onTimeRangeEndChange={handleTimeRangeEndChange}
+          onTimeRangeChange={handleTimeRangeChange}
           locationLoading={locationsLoading}
           allLocationsProgress={allLocationsProgress}
           distances={distances.size > 0 ? distances : undefined}
@@ -228,7 +248,12 @@ function App() {
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
             </svg>
             <span className="text-slate-600 dark:text-slate-400">
-              Allow location access to sort courts by distance from you.
+              {/* Say why it is unavailable when we know — "allow location
+                  access" is unhelpful advice to someone who already denied it,
+                  or whose browser has no geolocation at all. */}
+              {userLocation.error
+                ? `${userLocation.error} — courts are listed alphabetically instead of by distance.`
+                : 'Allow location access to sort courts by distance from you.'}
             </span>
           </div>
         )}
