@@ -6,8 +6,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>DBKL Court Finder</title>
     <meta name="description" content="Live badminton, futsal and sports court availability across 59+ DBKL facilities in Kuala Lumpur. Filter by consecutive hours, time window and distance." />
-    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+    <!-- One tag, kept in step with the resolved theme by the script below and by
+         useTheme. A pair gated on prefers-color-scheme would follow the OS and
+         so contradict the page as soon as the user overrides the theme.
+         These values mirror --color-bg-base in src/index.css. -->
+    <meta name="theme-color" content="#f8fafc" />
     <meta property="og:title" content="DBKL Court Finder" />
     <meta property="og:description" content="Live sports court availability across DBKL facilities in Kuala Lumpur." />
     <meta property="og:type" content="website" />
@@ -22,14 +25,21 @@
     <script>
       // Apply theme before paint to prevent FOUC.
       (function () {
+        var isDark = false;
+        try {
+          isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } catch (e) {
+          // No matchMedia; stay light.
+        }
         try {
           var stored = localStorage.getItem('theme');
-          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var isDark = stored ? stored === 'dark' : prefersDark;
-          if (isDark) document.documentElement.classList.add('dark');
+          if (stored) isDark = stored === 'dark';
         } catch (e) {
-          // localStorage may be unavailable; default to light.
+          // Storage unavailable — keep the OS preference rather than forcing light.
         }
+        document.documentElement.classList.toggle('dark', isDark);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');
       })();
     </script>
   </head>
