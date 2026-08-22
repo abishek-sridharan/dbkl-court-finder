@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { TIME_ORDER } from '../utils/consecutiveSlots';
+import { addDays, toLocalIso } from '../utils/date';
 import { SPORT_OPTIONS } from '../types';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import type { SportCategory } from '../types';
@@ -74,29 +75,25 @@ export function FilterBar({
   const locationInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const toLocalIso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
   const today = new Date();
   const minDate = toLocalIso(today);
-  const maxDate = toLocalIso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 21));
+  const maxDate = toLocalIso(addDays(today, 21));
 
   // Date navigation helpers
   const shiftDate = (days: number) => {
-    const current = new Date(date + 'T00:00:00');
-    current.setDate(current.getDate() + days);
-    const iso = toLocalIso(current);
+    const iso = toLocalIso(addDays(new Date(date + 'T00:00:00'), days));
     if (iso >= minDate && iso <= maxDate) onDateChange(iso);
   };
 
   // Format date for summary display
   const formatDateShort = (d: string) => {
-    const dt = new Date(d + 'T00:00:00');
-    const todayStr = today.toISOString().split('T')[0];
-    const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().split('T')[0];
-    if (d === todayStr) return 'Today';
-    if (d === tomorrowStr) return 'Tomorrow';
-    return dt.toLocaleDateString('en-MY', { weekday: 'short', day: 'numeric', month: 'short' });
+    if (d === minDate) return 'Today';
+    if (d === toLocalIso(addDays(today, 1))) return 'Tomorrow';
+    return new Date(d + 'T00:00:00').toLocaleDateString('en-MY', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
   };
 
   // Sort locations: by distance (keyed by location_id) if available, else alphabetically
