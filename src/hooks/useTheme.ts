@@ -21,8 +21,18 @@ function readInitialTheme(): Theme {
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
-  if (theme === 'dark') root.classList.add('dark');
-  else root.classList.remove('dark');
+  root.classList.toggle('dark', theme === 'dark');
+
+  // Keep the browser's own chrome in step with the toggle. index.html carries a
+  // single theme-color tag rather than a prefers-color-scheme pair, because
+  // those follow the OS and would contradict the page once the user overrides
+  // the theme. Reading --color-bg-base back after the class change keeps the
+  // tint tied to the actual page background instead of a second copy of the
+  // hex values that could drift from it.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const background = getComputedStyle(root).getPropertyValue('--color-bg-base').trim();
+  if (background) meta.setAttribute('content', background);
 }
 
 export function useTheme(): UseThemeReturn {
