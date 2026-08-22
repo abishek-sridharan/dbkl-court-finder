@@ -46,12 +46,23 @@ function toRad(degrees: number): number {
 const ROAD_CORRECTION_FACTOR = 2;
 
 /**
- * Format a straight-line distance for display, applying a road correction factor
- * so the value is closer to actual driving distance.
+ * Estimated road distance in km, from a straight-line distance.
+ *
+ * Anything the user compares against a displayed distance must go through this:
+ * filtering on the raw straight-line value while showing the corrected one made
+ * "within 10 km" quietly admit venues whose badge read ~20 km.
+ */
+export function roadDistanceKm(straightLineKm: number): number {
+  return straightLineKm * ROAD_CORRECTION_FACTOR;
+}
+
+/**
+ * Format a straight-line distance for display, applying the road correction so
+ * the value is closer to actual driving distance.
  * The "~" prefix signals this is an estimate, not a measured road distance.
  */
 export function formatDistance(straightLineKm: number): string {
-  const km = straightLineKm * ROAD_CORRECTION_FACTOR;
+  const km = roadDistanceKm(straightLineKm);
   if (km < 1) {
     return '~' + Math.round(km * 1000) + ' m';
   }

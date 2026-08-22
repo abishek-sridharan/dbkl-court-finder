@@ -1,20 +1,21 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
-import { TIME_ORDER } from '../utils/consecutiveSlots';
+import { HOUR_COUNT, shortTimeLabel, timeIndex, TIME_ORDER } from '../utils/consecutiveSlots';
 import { addDays, toLocalIso } from '../utils/date';
 import { SPORT_OPTIONS } from '../types';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import type { SportCategory } from '../types';
 
-// Display labels for each time slot
-const TIME_LABELS: Record<string, string> = {
-  '8:00 AM': '8a', '9:00 AM': '9a', '10:00 AM': '10a', '11:00 AM': '11a',
-  '12:00 PM': '12p', '1:00 PM': '1p', '2:00 PM': '2p', '3:00 PM': '3p',
-  '4:00 PM': '4p', '5:00 PM': '5p', '6:00 PM': '6p', '7:00 PM': '7p',
-  '8:00 PM': '8p', '9:00 PM': '9p', '10:00 PM': '10p',
-};
-
 // Only show the bookable hours in the picker
 const PICKER_SLOTS = TIME_ORDER.slice(0, 15); // 8 AM → 10 PM
+
+const MAX_COURTS_NEEDED = 20;
+
+/** Keep a typed number inside its stated bounds — the max attribute alone is advisory. */
+function clampNumberInput(raw: string, max: number): number {
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(Math.max(1, parsed), max);
+}
 
 interface LocationEntry {
   location_id: string;
@@ -34,9 +35,9 @@ interface FilterBarProps {
   minCourtsNeeded: number;
   onMinCourtsChange: (n: number) => void;
   timeRangeStart: string | null;
-  onTimeRangeStartChange: (time: string | null) => void;
   timeRangeEnd: string | null;
-  onTimeRangeEndChange: (time: string | null) => void;
+  // Both endpoints move together — see the note on handleTimeRangeChange in App.
+  onTimeRangeChange: (start: string | null, end: string | null) => void;
   locationLoading: boolean;
   allLocationsProgress: number;
   distances?: Map<string, { formatted: string; km: number }>; // keyed by location_id
@@ -58,9 +59,8 @@ export function FilterBar({
   minCourtsNeeded,
   onMinCourtsChange,
   timeRangeStart,
-  onTimeRangeStartChange,
   timeRangeEnd,
-  onTimeRangeEndChange,
+  onTimeRangeChange,
   locationLoading,
   allLocationsProgress,
   distances,
@@ -135,41 +135,51 @@ export function FilterBar({
     }
   }, [showLocationDropdown]);
 
-  // Clickable time-range picker logic
-  const handleTimeClick = useCallback((time: string) => {
-    if (!timeRangeStart && !timeRangeEnd) {
-      onTimeRangeStartChange(time);
-      return;
-    }
-    if (timeRangeStart && !timeRangeEnd) {
-      if (time === timeRangeStart) {
-        onTimeRangeStartChange(null);
+  /*
+    Clickable time-range picker. Each tap resolves to one complete (start, end)
+    pair which is handed over in a single call, so the two endpoints can never
+    be read half-updated.
+  */
+  const handleTimeClick = useCallback(
+    (time: string) => {
+      // Nothing selected yet — this tap opens the range.
+      if (!timeRangeStart && !timeRangeEnd) {
+        onTimeRangeChange(time, null);
         return;
       }
-      const si = TIME_ORDER.indexOf(timeRangeStart);
-      const ei = TIME_ORDER.indexOf(time);
-      if (ei < si) {
-        onTimeRangeStartChange(time);
-        onTimeRangeEndChange(timeRangeStart);
-      } else {
-        onTimeRangeEndChange(time);
-      }
-      return;
-    }
-    if (timeRangeStart && timeRangeEnd) {
-      if (time === timeRangeStart) {
-        onTimeRangeStartChange(timeRangeEnd);
-        onTimeRangeEndChange(null);
+
+      if (timeRangeStart && !timeRangeEnd) {
+        // Tapping the start again clears the range.
+        if (time === timeRangeStart) {
+          onTimeRangeChange(null, null);
+          return;
+        }
+        // Tapping earlier than the start means the user picked the endpoints
+        // the other way round; take it as the range they described.
+        if (timeIndex(time) < timeIndex(timeRangeStart)) {
+          onTimeRangeChange(time, timeRangeStart);
+        } else {
+          onTimeRangeChange(timeRangeStart, time);
+        }
         return;
       }
-      if (time === timeRangeEnd) {
-        onTimeRangeEndChange(null);
-        return;
+
+      if (timeRangeStart && timeRangeEnd) {
+        // Tapping either endpoint of a closed range drops that endpoint.
+        if (time === timeRangeStart) {
+          onTimeRangeChange(timeRangeEnd, null);
+          return;
+        }
+        if (time === timeRangeEnd) {
+          onTimeRangeChange(timeRangeStart, null);
+          return;
+        }
+        // Anything else starts a fresh range.
+        onTimeRangeChange(time, null);
       }
-      onTimeRangeStartChange(time);
-      onTimeRangeEndChange(null);
-    }
-  }, [timeRangeStart, timeRangeEnd, onTimeRangeStartChange, onTimeRangeEndChange]);
+    },
+    [timeRangeStart, timeRangeEnd, onTimeRangeChange],
+  );
 
   const startIdx = timeRangeStart ? TIME_ORDER.indexOf(timeRangeStart) : -1;
   const endIdx = timeRangeEnd ? TIME_ORDER.indexOf(timeRangeEnd) : -1;
@@ -414,9 +424,9 @@ export function FilterBar({
                 <input
                   type="number"
                   min="1"
-                  max="12"
+                  max={HOUR_COUNT}
                   value={minConsecutiveSlots}
-                  onChange={e => onMinSlotsChange(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={e => onMinSlotsChange(clampNumberInput(e.target.value, HOUR_COUNT))}
                   className="w-16 px-2 py-2.5 min-h-[44px] sm:min-h-0 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-900 dark:text-white text-base sm:text-sm text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 transition-colors"
                 />
               </div>
@@ -446,9 +456,9 @@ export function FilterBar({
                 <input
                   type="number"
                   min="1"
-                  max="20"
+                  max={MAX_COURTS_NEEDED}
                   value={minCourtsNeeded}
-                  onChange={e => onMinCourtsChange(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={e => onMinCourtsChange(clampNumberInput(e.target.value, MAX_COURTS_NEEDED))}
                   className="w-16 px-2 py-2.5 min-h-[44px] sm:min-h-0 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-900 dark:text-white text-base sm:text-sm text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 transition-colors"
                 />
               </div>
@@ -467,7 +477,7 @@ export function FilterBar({
               <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{rangeLabel}</span>
               {(timeRangeStart || timeRangeEnd) && (
                 <button
-                  onClick={() => { onTimeRangeStartChange(null); onTimeRangeEndChange(null); }}
+                  onClick={() => onTimeRangeChange(null, null)}
                   className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors ml-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 rounded"
                 >
                   Clear
@@ -490,7 +500,7 @@ export function FilterBar({
                         : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-slate-900 dark:hover:text-slate-200'
                     }`}
                   >
-                    {TIME_LABELS[time] ?? time}
+                    {shortTimeLabel(time)}
                   </button>
                 );
               })}

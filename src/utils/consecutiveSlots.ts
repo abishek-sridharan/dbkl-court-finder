@@ -6,11 +6,24 @@ const TIME_ORDER = [
 
 // Bookable hours, indexed by their start time in TIME_ORDER: hour 0 is 8–9 AM,
 // hour 15 is 11 PM–12 AM. The final TIME_ORDER entry is an end time only.
-const HOUR_COUNT = TIME_ORDER.length - 1;
+export const HOUR_COUNT = TIME_ORDER.length - 1;
 
 export function timeIndex(time: string): number {
   const idx = TIME_ORDER.indexOf(time);
   return idx === -1 ? 999 : idx;
+}
+
+/**
+ * Compact label for a time, e.g. "8:00 AM" → "8a", "10:00 PM" → "10p".
+ *
+ * The meridiem letter is not optional: dropping it leaves 8, 9, 10 and 11
+ * appearing twice in the same header with nothing to separate morning from
+ * night. Shared so the filter chips and the timeline header always agree.
+ */
+export function shortTimeLabel(time: string): string {
+  const match = time.match(/^(\d{1,2}):00\s*(AM|PM)$/);
+  if (!match) return time;
+  return `${match[1]}${match[2] === 'AM' ? 'a' : 'p'}`;
 }
 
 export interface LocationFacilityTime {

@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   countCourtsWithSharedWindow,
   hasConsecutiveSlotsInRange,
+  shortTimeLabel,
   TIME_ORDER,
 } from "../utils/consecutiveSlots";
 import { CourtRow } from "./CourtRow";
@@ -65,6 +66,14 @@ export function TimelineView({
   const [collapsedLocations, setCollapsedLocations] = useState<Set<string>>(
     new Set(),
   );
+
+  // Collapsing is a judgement about a venue, so it survives a date change — the
+  // same venues are still listed. Switching sport replaces the list entirely,
+  // so carrying the old collapse state over would hide venues for no reason the
+  // user could see.
+  useEffect(() => {
+    setCollapsedLocations(new Set());
+  }, [sport]);
 
   const toggleCollapse = (locName: string) => {
     setCollapsedLocations((prev) => {
@@ -236,22 +245,27 @@ export function TimelineView({
     );
   }
 
-  // Progress bar while loading all locations
+  // Progress while loading. A venue count only means something when the
+  // all-locations sweep is running; for a single venue it read "0 / … locations".
   if (loading && courts.length === 0) {
-    const pct =
-      totalCount > 0 ? Math.round((loadedCount / totalCount) * 100) : 0;
+    const isSweep = totalCount > 0;
+    const pct = isSweep ? Math.round((loadedCount / totalCount) * 100) : 0;
     return (
       <div className="bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-2xl p-8 text-center transition-colors duration-200">
         <p className="text-slate-700 dark:text-slate-300 text-sm font-medium mb-3">
-          Loading courts — {loadedCount} / {totalCount || "…"} locations
+          {isSweep
+            ? `Loading courts — ${loadedCount} / ${totalCount} locations`
+            : "Loading courts…"}
         </p>
         <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden">
           <div
-            className="shimmer-bar h-full rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
+            className={`shimmer-bar h-full rounded-full transition-all duration-300 ${isSweep ? "" : "w-full"}`}
+            style={isSweep ? { width: `${pct}%` } : undefined}
           />
         </div>
-        <p className="text-slate-500 dark:text-slate-500 text-xs mt-2">{pct}% complete</p>
+        {isSweep && (
+          <p className="text-slate-500 dark:text-slate-500 text-xs mt-2">{pct}% complete</p>
+        )}
       </div>
     );
   }
@@ -393,9 +407,10 @@ export function TimelineView({
                     : "text-slate-600 dark:text-slate-400"
                 }`}
               >
-                {useDesktopGrid
-                  ? slot.replace(":00 ", "").toLowerCase()
-                  : slot.includes("12:00 PM") ? "12p" : slot.replace(/:00 (AM|PM)/, "").trim()}
+                {/* Always keep the a/p suffix: without it 8, 9, 10 and 11 each
+                    appear twice in the same header with nothing to tell morning
+                    from night. */}
+                {shortTimeLabel(slot)}
               </div>
             ))}
           </div>
@@ -536,10 +551,16 @@ export function TimelineView({
           <div className="w-3.5 h-3.5 rounded-sm bg-slate-200 dark:bg-slate-700" />
           <span className="text-xs sm:text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Booked</span>
         </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3.5 h-3.5 rounded-sm bg-slate-100 dark:bg-slate-800 border border-slate-300/70 dark:border-slate-700" />
+          <span className="text-xs sm:text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">No session</span>
+        </div>
         {(timeRangeStart || timeRangeEnd) && (
           <div className="flex items-center gap-1.5">
-            <div className="w-3.5 h-3.5 rounded-sm bg-orange-500/30 border border-orange-500/50" />
-            <span className="text-xs sm:text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">In window</span>
+            {/* The window is marked on the hour labels, not the cells — so show
+                the label treatment rather than a swatch that never appears. */}
+            <span className="text-xs sm:text-[11px] font-medium text-orange-600 dark:text-orange-400">7p</span>
+            <span className="text-xs sm:text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">Hours in your window</span>
           </div>
         )}
         {distances && distances.size > 0 && (
