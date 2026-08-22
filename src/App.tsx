@@ -10,6 +10,7 @@ import { useUserLocation } from './hooks/useUserLocation';
 import { useLocationDetails } from './hooks/useLocationDetails';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { haversineKm, formatDistance } from './utils/distance';
+import { todayLocalIso } from './utils/date';
 import { TIME_ORDER } from './utils/consecutiveSlots';
 import { SPORT_OPTIONS } from './types';
 import type { SportCategory } from './types';
@@ -18,19 +19,10 @@ import { Analytics } from '@vercel/analytics/react';
 const NEAR_ME_MAX_KM = 10;
 
 function App() {
-  const getTodayDate = () => {
-    const today = new Date();
-    return [
-      today.getFullYear(),
-      String(today.getMonth() + 1).padStart(2, '0'),
-      String(today.getDate()).padStart(2, '0'),
-    ].join('-');
-  };
-
   const isSmUp = useMediaQuery('(min-width: 640px)');
 
   const [sport, setSportRaw] = useState<SportCategory>('BADMINTON');
-  const [date, setDate] = useState(getTodayDate());
+  const [date, setDate] = useState(todayLocalIso);
   const [locationId, setLocationId] = useState('');
   const [nearMeOnly, setNearMeOnly] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -94,6 +86,7 @@ function App() {
   const allLocationsProgress = isAllLocations ? allFacilities.progress : 0;
   const loadedCount = isAllLocations ? allFacilities.loadedCount : 0;
   const totalCount = isAllLocations ? allFacilities.totalCount : 0;
+  const failedCount = isAllLocations ? allFacilities.failedCount : 0;
 
   // Geolocation
   const userLocation = useUserLocation();
@@ -245,6 +238,8 @@ function App() {
           locationDetails={locationDetails}
           loadedCount={loadedCount}
           totalCount={totalCount}
+          failedCount={failedCount}
+          onRetry={handleRefresh}
         />
       </main>
 

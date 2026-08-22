@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import {
+  countCourtsWithSharedWindow,
   hasConsecutiveSlotsInRange,
   TIME_ORDER,
 } from "../utils/consecutiveSlots";
@@ -22,6 +23,8 @@ interface TimelineViewProps {
   locationDetails?: Map<string, LocationDetail>; // keyed by location_id
   loadedCount?: number;
   totalCount?: number;
+  failedCount?: number;
+  onRetry?: () => void;
 }
 
 // Shared ordered list of display labels for the time header.
@@ -44,6 +47,8 @@ export function TimelineView({
   locationDetails,
   loadedCount = 0,
   totalCount = 0,
+  failedCount = 0,
+  onRetry,
 }: TimelineViewProps) {
   const isSmUp = useMediaQuery('(min-width: 640px)');
   const isLandscape = useMediaQuery('(orientation: landscape) and (min-width: 480px)');
@@ -80,27 +85,6 @@ export function TimelineView({
     [courtsPassingFilter],
   );
 
-  // Location IDs that have enough passing courts to satisfy minCourtsNeeded
-  const qualifyingLocationIds = useMemo(() => {
-    const countByLoc: Record<string, number> = {};
-    courtsPassingFilter.forEach((c) => {
-      countByLoc[c.location_id] = (countByLoc[c.location_id] ?? 0) + 1;
-    });
-    return new Set(
-      Object.entries(countByLoc)
-        .filter(([, count]) => count >= minCourtsNeeded)
-        .map(([id]) => id),
-    );
-  }, [courtsPassingFilter, minCourtsNeeded]);
-
-  // Courts to display: when showDimmed, show all courts regardless; otherwise show only those in qualifying locations
-  const displayedCourts = useMemo(() => {
-    if (showDimmed) return courts;
-    return courtsPassingFilter.filter((c) =>
-      qualifyingLocationIds.has(c.location_id),
-    );
-  }, [showDimmed, courts, courtsPassingFilter, qualifyingLocationIds]);
-
   // Group ALL courts by location_id (unique key) — used for totals and sorting
   const allCourtsByLocId = useMemo(() => {
     const grouped: Record<string, LocationFacility[]> = {};
@@ -109,6 +93,37 @@ export function TimelineView({
     });
     return grouped;
   }, [courts]);
+
+  // Location IDs with enough courts free for the SAME window to satisfy
+  // minCourtsNeeded. Counting courts that each pass the filter separately would
+  // qualify a venue whose free windows never overlap — no use to one group.
+  const qualifyingLocationIds = useMemo(() => {
+    const qualifying = new Set<string>();
+    Object.entries(allCourtsByLocId).forEach(([locId, locationCourts]) => {
+      const shared = countCourtsWithSharedWindow(
+        locationCourts.map((c) => c.location_facility_times),
+        minConsecutiveSlots,
+        timeRangeStart,
+        timeRangeEnd,
+      );
+      if (shared >= minCourtsNeeded) qualifying.add(locId);
+    });
+    return qualifying;
+  }, [
+    allCourtsByLocId,
+    minConsecutiveSlots,
+    minCourtsNeeded,
+    timeRangeStart,
+    timeRangeEnd,
+  ]);
+
+  // Courts to display: when showDimmed, show all courts regardless; otherwise show only those in qualifying locations
+  const displayedCourts = useMemo(() => {
+    if (showDimmed) return courts;
+    return courtsPassingFilter.filter((c) =>
+      qualifyingLocationIds.has(c.location_id),
+    );
+  }, [showDimmed, courts, courtsPassingFilter, qualifyingLocationIds]);
 
   // Group DISPLAYED courts by location_id — used for rendering rows
   const courtsByLocId = useMemo(() => {
@@ -198,6 +213,14 @@ export function TimelineView({
       <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-2xl p-5 text-red-700 dark:text-red-300">
         <p className="font-semibold">Error loading courts</p>
         <p className="text-sm mt-1 text-red-600 dark:text-red-400">{error}</p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-3 px-3 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 active:scale-[0.97] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60"
+          >
+            Try again
+          </button>
+        )}
       </div>
     );
   }
@@ -224,14 +247,19 @@ export function TimelineView({
 
   if (courts.length === 0 && !loading) {
     return (
-      <div className="bg-white/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-10 text-center transition-colors duration-200">
-        <div className="text-5xl mb-3">🏸</div>
-        <p className="font-medium text-slate-700 dark:text-slate-400">
-          No courts found for the selected filters.
-        </p>
-        <p className="text-xs mt-1 text-slate-500 dark:text-slate-500">
-          Try widening the time window, lowering minimum hours, or picking a different date.
-        </p>
+      <div className="space-y-4">
+        {failedCount > 0 && (
+          <FailedVenuesNotice failedCount={failedCount} onRetry={onRetry} />
+        )}
+        <div className="bg-white/70 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl p-10 text-center transition-colors duration-200">
+          <div className="text-5xl mb-3">🏸</div>
+          <p className="font-medium text-slate-700 dark:text-slate-400">
+            No courts found for the selected filters.
+          </p>
+          <p className="text-xs mt-1 text-slate-500 dark:text-slate-500">
+            Try widening the time window, lowering minimum hours, or picking a different date.
+          </p>
+        </div>
       </div>
     );
   }
@@ -261,6 +289,11 @@ export function TimelineView({
             />
           </div>
         </div>
+      )}
+
+      {/* Some venues did not respond — say so rather than passing them off as full */}
+      {!loading && failedCount > 0 && (
+        <FailedVenuesNotice failedCount={failedCount} onRetry={onRetry} />
       )}
 
       {/* Stats bar */}
@@ -501,6 +534,33 @@ export function TimelineView({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+interface FailedVenuesNoticeProps {
+  failedCount: number;
+  onRetry?: () => void;
+}
+
+function FailedVenuesNotice({ failedCount, onRetry }: FailedVenuesNoticeProps) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center justify-between gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/60 rounded-xl px-4 py-2.5 text-sm text-amber-800 dark:text-amber-300"
+    >
+      <span>
+        {failedCount} {failedCount === 1 ? "venue" : "venues"} could not be
+        loaded — availability may be incomplete.
+      </span>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 rounded"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }

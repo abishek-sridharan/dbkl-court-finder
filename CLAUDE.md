@@ -44,11 +44,14 @@ App.tsx (state)
 ```
 
 **Key utilities in `src/utils/`:**
-- `consecutiveSlots.ts` — `TIME_ORDER` array (8 AM → 12 AM) and `hasConsecutiveSlotsInRange()` for filtering courts by available consecutive hours within a time window
+- `consecutiveSlots.ts` — `TIME_ORDER` array (8 AM → 12 AM, 16 bookable hours) plus all availability logic. `hasConsecutiveSlotsInRange()` filters one court, `countCourtsWithSharedWindow()` counts courts free in the *same* window (what "min courts needed" means), and `slotSpan()` gives a record's width in hour columns. Never derive a span from `start_time_id`/`end_time_id` — those wrap at midnight (10 PM = 23, 12 AM = 1) — and never trust `end_time_value` blindly, since at least one venue emits "12:00 PM → 1:00 AM"
+
+  The API returns *overlapping* records for one start time (a 1-hour "6–7 PM" alongside a 2-hour "6–8 PM"), and they contradict each other: some venues sell the evening only as 2-hour blocks, marking the block available and every 1-hour record inside it booked. `dedupeSlotsByStart()` resolves this by preferring the **available** record first and the shorter one only as a tiebreak — preferring the shorter record would paint a court that is free all evening as fully booked. Both `CourtRow` and the filters read through this one function, and `buildHourAvailability()` walks hours exactly as `CourtRow` walks columns, so the grid and the filters can never disagree about an hour
+- `date.ts` — local-timezone `YYYY-MM-DD` helpers (`toLocalIso`, `todayLocalIso`, `addDays`). Never use `toISOString()` for these dates: it returns UTC and is a day behind for the first 8 hours of every Malaysian morning
 - `distance.ts` — Haversine formula with a 2× road correction factor; `isValidMalaysiaCoord()` for coordinate validation
 - `geocoding.ts` — Nominatim integration for coordinate lookup by location name
 
-**Caching strategy:** Location list is kept in module-level state (no re-fetch). Geocoding results are stored in localStorage. DBKL coordinates fetched per location and memoized during the session.
+**Caching strategy:** Location list is kept in module-level state (no re-fetch). Location coordinates and parliament names are cached in localStorage under `dbkl_location_details_v3` as `{ detail, fetchedAt }` entries — successes expire after 30 days, failed lookups after 24 hours so a transient geocoding failure does not disable a venue's distance permanently. Court availability itself is not cached; it is re-fetched on every filter change.
 
 ## Conventions
 
