@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   countCourtsWithSharedWindow,
   hasConsecutiveSlotsInRange,
@@ -32,6 +32,15 @@ interface TimelineViewProps {
 const HEADER_TIMES = TIME_ORDER.slice(0, 16); // 8AM–11PM
 const VENUE_COLUMN_WIDTH = 160;
 const TIME_COLUMN_MIN_WIDTH = 32;
+
+// Deep link to DBKL's booking page for one venue on the selected date.
+function buildBookingUrl(
+  locationId: string,
+  date: string,
+  sport: SportCategory,
+): string {
+  return `https://tempahkl.dbkl.gov.my/facility/detail/book?location_id=${locationId}&start_date=${date}&sub_category=${encodeURIComponent(sport)}&toggle_step=1`;
+}
 
 export function TimelineView({
   courts,
@@ -183,7 +192,9 @@ export function TimelineView({
     return { allTimeSlots: slots, timeValueToId: valueToId };
   }, [courts]);
 
-  // Ordered list of start_time_ids matching the header columns, used by CourtRow for dedup
+  // Ordered list of start_time_ids matching the header columns, used by CourtRow
+  // for dedup. This array gets a new identity on every batch of venues, so
+  // CourtRow compares it by content rather than by reference.
   const allTimeSlotIds = useMemo(
     () => allTimeSlots.map((t) => timeValueToId.get(t) ?? ""),
     [allTimeSlots, timeValueToId],
@@ -408,6 +419,9 @@ export function TimelineView({
               const isCollapsed = collapsedLocations.has(locId);
               const dist = distances?.get(locId); // keyed by location_id
               const parlimentName = locationDetails?.get(locId)?.parliment_name;
+              // One URL per venue, shared by the header button and every slot
+              // tooltip, so the two entry points cannot drift apart.
+              const bookingUrl = buildBookingUrl(locId, date, sport);
 
               return (
                 <div
@@ -461,7 +475,7 @@ export function TimelineView({
 
                       {/* Book on DBKL — deep link to the booking page for this venue/date/sport */}
                       <a
-                        href={`https://tempahkl.dbkl.gov.my/facility/detail/book?location_id=${locId}&start_date=${date}&sub_category=${encodeURIComponent(sport)}&toggle_step=1`}
+                        href={bookingUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
@@ -499,7 +513,7 @@ export function TimelineView({
                           timeSlotIds={allTimeSlotIds}
                           venueColWidth={VENUE_COLUMN_WIDTH}
                           showVenueColumn={useDesktopGrid}
-                          bookingUrl={`https://tempahkl.dbkl.gov.my/facility/detail/book?location_id=${locId}&start_date=${date}&sub_category=${encodeURIComponent(sport)}&toggle_step=1`}
+                          bookingUrl={bookingUrl}
                         />
                       ))}
                     </div>

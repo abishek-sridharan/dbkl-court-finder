@@ -11,6 +11,7 @@ import { useLocationDetails } from './hooks/useLocationDetails';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { haversineKm, formatDistance } from './utils/distance';
 import { todayLocalIso } from './utils/date';
+import { clearFacilityCache } from './utils/facilityCache';
 import { TIME_ORDER } from './utils/consecutiveSlots';
 import { SPORT_OPTIONS } from './types';
 import type { SportCategory } from './types';
@@ -28,37 +29,46 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Reset location when sport changes — previous location may not offer the new sport
-  const handleSportChange = (newSport: SportCategory) => {
+  const handleSportChange = useCallback((newSport: SportCategory) => {
     setSportRaw(newSport);
     setLocationId('');
-  };
+  }, []);
   const [minConsecutiveSlots, setMinConsecutiveSlots] = useState(2);
   const [minCourtsNeeded, setMinCourtsNeeded] = useState(1);
   const [timeRangeStart, setTimeRangeStart] = useState<string | null>(null);
   const [timeRangeEnd, setTimeRangeEnd] = useState<string | null>(null);
 
   // Wrappers that auto-sync minConsecutiveSlots when the time range changes.
-  const handleTimeRangeStartChange = (start: string | null) => {
-    setTimeRangeStart(start);
-    if (start && timeRangeEnd) {
-      const span = TIME_ORDER.indexOf(timeRangeEnd) - TIME_ORDER.indexOf(start);
-      if (span > 0) setMinConsecutiveSlots(span);
-    } else if (!start && !timeRangeEnd) {
-      setMinConsecutiveSlots(1);
-    }
-  };
+  const handleTimeRangeStartChange = useCallback(
+    (start: string | null) => {
+      setTimeRangeStart(start);
+      if (start && timeRangeEnd) {
+        const span = TIME_ORDER.indexOf(timeRangeEnd) - TIME_ORDER.indexOf(start);
+        if (span > 0) setMinConsecutiveSlots(span);
+      } else if (!start && !timeRangeEnd) {
+        setMinConsecutiveSlots(1);
+      }
+    },
+    [timeRangeEnd],
+  );
 
-  const handleTimeRangeEndChange = (end: string | null) => {
-    setTimeRangeEnd(end);
-    if (timeRangeStart && end) {
-      const span = TIME_ORDER.indexOf(end) - TIME_ORDER.indexOf(timeRangeStart);
-      if (span > 0) setMinConsecutiveSlots(span);
-    } else if (!timeRangeStart && !end) {
-      setMinConsecutiveSlots(1);
-    }
-  };
+  const handleTimeRangeEndChange = useCallback(
+    (end: string | null) => {
+      setTimeRangeEnd(end);
+      if (timeRangeStart && end) {
+        const span = TIME_ORDER.indexOf(end) - TIME_ORDER.indexOf(timeRangeStart);
+        if (span > 0) setMinConsecutiveSlots(span);
+      } else if (!timeRangeStart && !end) {
+        setMinConsecutiveSlots(1);
+      }
+    },
+    [timeRangeStart],
+  );
 
+  // Refresh must drop the cache first, or the refetch would just serve the same
+  // cached courts back and the button would appear to do nothing.
   const handleRefresh = useCallback(() => {
+    clearFacilityCache();
     setRefreshKey(k => k + 1);
   }, []);
 
