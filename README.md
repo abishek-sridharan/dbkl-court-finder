@@ -52,7 +52,7 @@ Browse availability for 11 sport categories:
 | Styling    | Tailwind CSS 4                                                |
 | Fonts      | Outfit (headings), Inter (body) via Google Fonts              |
 | APIs       | DBKL Public API, OpenStreetMap Nominatim (geocoding fallback) |
-| CI         | GitHub Actions (Claude Code Review workflow)                  |
+| CI         | GitHub Actions — lint, type-check and build on every PR       |
 
 ## Getting Started
 
