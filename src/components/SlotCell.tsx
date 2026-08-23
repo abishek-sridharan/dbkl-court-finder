@@ -5,6 +5,13 @@ interface SlotCellProps {
   slot: LocationFacilityTime;
   columnSpan: number;
   bookingUrl?: string;
+  /**
+   * Where to anchor the tooltip. Centred by default, but the columns at either
+   * end anchor inward — a centred tooltip on the last column runs past the card
+   * (where it gets clipped) and past the viewport on a phone, which makes the
+   * whole page scroll sideways.
+   */
+  align?: 'start' | 'center' | 'end';
 }
 
 /*
@@ -18,7 +25,7 @@ const BOOKED_STRIPES =
 
 // Memoised alongside CourtRow — these are the ~4,600 cells that would otherwise
 // re-render on every batch of venues that lands.
-export const SlotCell = memo(function SlotCell({ slot, columnSpan, bookingUrl }: SlotCellProps) {
+export const SlotCell = memo(function SlotCell({ slot, columnSpan, bookingUrl, align = 'center' }: SlotCellProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   // Escape has to hide the tooltip even though the cell keeps focus, or it is
   // not dismissible without moving focus (WCAG 1.4.13). Without this the
@@ -29,6 +36,13 @@ export const SlotCell = memo(function SlotCell({ slot, columnSpan, bookingUrl }:
   const label = slot.slot_available
     ? `${slot.start_time_value} to ${slot.end_time_value}, available${price}`
     : `${slot.start_time_value} to ${slot.end_time_value}, booked`;
+
+  const alignClass =
+    align === 'start'
+      ? 'left-0'
+      : align === 'end'
+        ? 'right-0'
+        : 'left-1/2 -translate-x-1/2';
 
   const stateClass = slot.slot_available
     ? 'bg-emerald-500 hover:shadow-[0_0_10px_rgba(74,222,128,0.6)]'
@@ -73,7 +87,7 @@ export const SlotCell = memo(function SlotCell({ slot, columnSpan, bookingUrl }:
           order entirely while the tooltip is closed. */}
       <div
         role="tooltip"
-        className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg whitespace-nowrap transition-opacity z-20 shadow-xl ${
+        className={`absolute bottom-full ${alignClass} mb-2 px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg whitespace-nowrap transition-opacity z-20 shadow-xl ${
           showTooltip
             ? 'opacity-100 visible'
             : dismissed

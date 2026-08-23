@@ -10,9 +10,16 @@ interface CourtRowProps {
   venueColWidth: number;
   showVenueColumn: boolean;
   bookingUrl?: string;
+  /**
+   * Half-open range of `timeSlotIds` to draw, for the split day on phones.
+   * The walk still starts at column 0 regardless, so a block that begins before
+   * the window and runs into it is drawn as a continuation rather than lost.
+   */
+  fromCol?: number;
+  toCol?: number;
 }
 
-function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, showVenueColumn, bookingUrl }: CourtRowProps) {
+function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, showVenueColumn, bookingUrl, fromCol = 0, toCol = timeSlotIds.length }: CourtRowProps) {
   /*
     The API sometimes returns overlapping slot records for the same time window
     (e.g. both a 1-hour "6–7 PM" slot AND a 2-hour "6–8 PM" slot).
@@ -31,17 +38,34 @@ function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, 
   const cells: React.ReactNode[] = [];
   let skipUntilCol = 0; // columns with index < skipUntilCol are covered by a previous multi-hour slot
 
-  for (let col = 0; col < timeSlotIds.length; col++) {
+  for (let col = 0; col < toCol; col++) {
     if (col < skipUntilCol) continue;
 
     const timeId = timeSlotIds[col];
     const slot = slotByStartId.get(timeId);
+
     if (slot) {
       // Clamp span so it never exceeds the remaining columns
-      const span = Math.min(slotSpan(slot), timeSlotIds.length - col);
+      const span = Math.min(slotSpan(slot), toCol - col);
       if (span > 1) skipUntilCol = col + span;
-      cells.push(<SlotCell key={slot.id} slot={slot} columnSpan={span} bookingUrl={bookingUrl} />);
+      // A block starting before the window still occupies its tail of it.
+      if (col + span <= fromCol) continue;
+      const visibleFrom = Math.max(col, fromCol);
+      // Anchor the tooltip inward at either end of the row, so it cannot spill
+      // past the card (where it would be clipped) or off a phone screen.
+      const align =
+        visibleFrom === fromCol ? 'start' : col + span >= toCol ? 'end' : 'center';
+      cells.push(
+        <SlotCell
+          key={slot.id}
+          slot={slot}
+          columnSpan={col + span - visibleFrom}
+          bookingUrl={bookingUrl}
+          align={align}
+        />
+      );
     } else {
+      if (col < fromCol) continue;
       // No record for this hour: the venue does not offer a session, which is
       // not the same as one being booked. Flat and unlabelled, versus the
       // striped booked cell, so the two are told apart by shape and not by two
@@ -55,9 +79,10 @@ function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, 
     }
   }
 
+  const visibleColumns = toCol - fromCol;
   const gridTemplate = showVenueColumn
-    ? `${venueColWidth}px repeat(${timeSlotIds.length}, minmax(32px, 1fr))`
-    : `repeat(${timeSlotIds.length}, 1fr)`;
+    ? `${venueColWidth}px repeat(${visibleColumns}, minmax(32px, 1fr))`
+    : `repeat(${visibleColumns}, 1fr)`;
 
   return (
     /*
@@ -110,6 +135,8 @@ export const CourtRow = React.memo(CourtRowImpl, (prev, next) => {
     prev.isDimmed === next.isDimmed &&
     prev.venueColWidth === next.venueColWidth &&
     prev.showVenueColumn === next.showVenueColumn &&
-    prev.bookingUrl === next.bookingUrl
+    prev.bookingUrl === next.bookingUrl &&
+    prev.fromCol === next.fromCol &&
+    prev.toCol === next.toCol
   );
 });
