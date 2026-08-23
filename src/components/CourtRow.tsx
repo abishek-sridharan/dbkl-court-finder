@@ -42,6 +42,10 @@ function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, 
       if (span > 1) skipUntilCol = col + span;
       cells.push(<SlotCell key={slot.id} slot={slot} columnSpan={span} bookingUrl={bookingUrl} />);
     } else {
+      // No record for this hour: the venue does not offer a session, which is
+      // not the same as one being booked. Flat and unlabelled, versus the
+      // striped booked cell, so the two are told apart by shape and not by two
+      // near-identical greys.
       cells.push(
         <div
           key={`empty-${timeId}`}
@@ -56,7 +60,16 @@ function CourtRowImpl({ venueName, slots, isDimmed, timeSlotIds, venueColWidth, 
     : `repeat(${timeSlotIds.length}, 1fr)`;
 
   return (
-    <div className={`py-1 ${isDimmed ? 'opacity-40' : ''}`}>
+    /*
+      Grouped and named by court: without it a slot button announces only
+      "6:00 PM to 7:00 PM, available" with no indication of which of a venue's
+      courts it belongs to.
+    */
+    <div
+      role="group"
+      aria-label={venueName}
+      className={`py-1 ${isDimmed ? 'opacity-40' : ''}`}
+    >
       {/* On mobile: venue name as a label above the slots */}
       {!showVenueColumn && (
         <div className="px-1 pb-0.5 font-medium text-xs text-slate-700 dark:text-slate-300 truncate">
