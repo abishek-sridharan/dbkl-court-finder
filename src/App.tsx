@@ -103,7 +103,6 @@ function App() {
   // it has to surface — otherwise it reads as "no courts match your filters".
   const courtsError =
     locationsError ?? (isAllLocations ? allFacilities.error : singleFacility.error);
-  const allLocationsProgress = isAllLocations ? allFacilities.progress : 0;
   const loadedCount = isAllLocations ? allFacilities.loadedCount : 0;
   const totalCount = isAllLocations ? allFacilities.totalCount : 0;
   const failedCount = isAllLocations ? allFacilities.failedCount : 0;
@@ -202,6 +201,7 @@ function App() {
           )}
           {/* Refresh button */}
           <button
+            type="button"
             onClick={handleRefresh}
             disabled={courtsLoading}
             className="w-11 h-11 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700 hover:border-emerald-500/60 active:scale-95 transition-all duration-200 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
@@ -234,7 +234,6 @@ function App() {
           timeRangeEnd={timeRangeEnd}
           onTimeRangeChange={handleTimeRangeChange}
           locationLoading={locationsLoading}
-          allLocationsProgress={allLocationsProgress}
           distances={distances.size > 0 ? distances : undefined}
           locationDetails={locationDetails}
           nearMeOnly={nearMeOnly}

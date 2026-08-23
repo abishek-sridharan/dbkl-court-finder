@@ -39,7 +39,6 @@ interface FilterBarProps {
   // Both endpoints move together — see the note on handleTimeRangeChange in App.
   onTimeRangeChange: (start: string | null, end: string | null) => void;
   locationLoading: boolean;
-  allLocationsProgress: number;
   distances?: Map<string, { formatted: string; km: number }>; // keyed by location_id
   locationDetails?: Map<string, { parliment_name: string; lat: number; lng: number; parliment_id: string; location_id: string }>;
   nearMeOnly: boolean;
@@ -62,7 +61,6 @@ export function FilterBar({
   timeRangeEnd,
   onTimeRangeChange,
   locationLoading,
-  allLocationsProgress,
   distances,
   locationDetails,
   nearMeOnly,
@@ -72,8 +70,12 @@ export function FilterBar({
   const [isExpanded, setIsExpanded] = useState(true);
   const [locationSearch, setLocationSearch] = useState('');
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  // Which option the arrow keys are sitting on. -1 means "All Locations", the
+  // row above the results; -2 means nothing is highlighted yet.
+  const [activeOption, setActiveOption] = useState(-2);
   const locationInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
 
   const today = new Date();
   const minDate = toLocalIso(today);
@@ -134,6 +136,65 @@ export function FilterBar({
       return () => document.removeEventListener('mousedown', handler);
     }
   }, [showLocationDropdown]);
+
+  const closeLocationDropdown = useCallback(() => {
+    setShowLocationDropdown(false);
+    setActiveOption(-2);
+    setLocationSearch('');
+  }, []);
+
+  const selectLocation = useCallback(
+    (id: string) => {
+      onLocationChange(id);
+      closeLocationDropdown();
+    },
+    [onLocationChange, closeLocationDropdown],
+  );
+
+  // Keep the highlighted option scrolled into view as the arrows move it.
+  useEffect(() => {
+    if (activeOption < -1 || !listboxRef.current) return;
+    const el = listboxRef.current.querySelector(`[data-option-index="${activeOption}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [activeOption]);
+
+  /*
+    Keyboard support for the location combobox. Without this the only way
+    through the list is Tab, one stop per venue — 59 of them — and there is no
+    way to dismiss the list at all.
+  */
+  const handleLocationKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const lastIndex = filteredLocations.length - 1;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeLocationDropdown();
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!showLocationDropdown) {
+        setShowLocationDropdown(true);
+        setActiveOption(-1);
+        return;
+      }
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const from = activeOption === -2 ? -1 : activeOption;
+      const next = from + step;
+      // -1 is the "All Locations" row; wrap around at both ends.
+      if (next > lastIndex) setActiveOption(-1);
+      else if (next < -1) setActiveOption(lastIndex);
+      else setActiveOption(next);
+      return;
+    }
+    if (e.key === 'Enter' && showLocationDropdown && activeOption !== -2) {
+      e.preventDefault();
+      if (activeOption === -1) selectLocation('');
+      else if (filteredLocations[activeOption]) {
+        selectLocation(filteredLocations[activeOption].location_id);
+      }
+    }
+  };
 
   /*
     Clickable time-range picker. Each tap resolves to one complete (start, end)
@@ -222,6 +283,8 @@ export function FilterBar({
       {!isSmUp && (
         <button
           onClick={() => setIsExpanded(prev => !prev)}
+          aria-expanded={isExpanded}
+          aria-controls="filter-panel"
           className="w-full flex items-center justify-between gap-2 mb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 rounded-lg"
         >
           <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
@@ -251,17 +314,19 @@ export function FilterBar({
 
       {/* Filter content — always visible on desktop, collapsible on mobile */}
       {(isSmUp || isExpanded) && (
-        <>
+        <div id="filter-panel">
           {/* Sport selector */}
           <div className="mb-4">
-            <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+            <span id="sport-label" className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
               Sport
-            </label>
-            <div className="flex flex-wrap gap-2">
+            </span>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="sport-label">
               {SPORT_OPTIONS.map(opt => (
                 <button
                   key={opt.value}
+                  type="button"
                   onClick={() => onSportChange(opt.value)}
+                  aria-pressed={sport === opt.value}
                   className={`px-3 py-2 min-h-[44px] sm:min-h-0 rounded-xl text-sm font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                     sport === opt.value
                       ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 dark:shadow-emerald-500/30'
@@ -278,11 +343,12 @@ export function FilterBar({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             {/* Date with prev/next arrows */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              <label htmlFor="filter-date" className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                 Date
               </label>
               <div className="flex items-center gap-1.5">
                 <button
+                  type="button"
                   onClick={() => shiftDate(-1)}
                   disabled={date <= minDate}
                   className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-30 transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
@@ -291,6 +357,7 @@ export function FilterBar({
                   <svg viewBox="0 0 24 24" className="w-4 h-4 fill-slate-600 dark:fill-slate-300"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                 </button>
                 <input
+                  id="filter-date"
                   type="date"
                   value={date}
                   min={minDate}
@@ -299,6 +366,7 @@ export function FilterBar({
                   className="flex-1 min-w-0 px-3 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-900 dark:text-white text-base sm:text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 transition-colors"
                 />
                 <button
+                  type="button"
                   onClick={() => shiftDate(1)}
                   disabled={date >= maxDate}
                   className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0 hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-30 transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
@@ -309,72 +377,123 @@ export function FilterBar({
               </div>
             </div>
 
-            {/* Location — searchable dropdown */}
+            {/* Location — searchable combobox */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              <label
+                htmlFor="filter-location"
+                className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5"
+              >
                 Location
               </label>
               <div className="relative" ref={dropdownRef}>
                 <div className="flex items-center gap-1.5">
                   <div className="relative flex-1">
                     <input
+                      id="filter-location"
                       ref={locationInputRef}
                       type="text"
+                      role="combobox"
+                      aria-expanded={showLocationDropdown}
+                      aria-controls="location-listbox"
+                      aria-autocomplete="list"
+                      aria-activedescendant={
+                        showLocationDropdown && activeOption >= -1
+                          ? `location-option-${activeOption}`
+                          : undefined
+                      }
+                      autoComplete="off"
                       value={showLocationDropdown ? locationSearch : (locationId ? selectedLocationName : '')}
-                      placeholder={locationLoading ? `Loading… ${allLocationsProgress}%` : 'Search locations…'}
+                      placeholder={locationLoading ? `Loading venues…` : 'Search locations…'}
                       disabled={locationLoading}
-                      onChange={e => { setLocationSearch(e.target.value); setShowLocationDropdown(true); }}
-                      onFocus={() => { setLocationSearch(''); setShowLocationDropdown(true); }}
+                      onChange={e => { setLocationSearch(e.target.value); setShowLocationDropdown(true); setActiveOption(-2); }}
+                      onFocus={() => { setLocationSearch(''); setShowLocationDropdown(true); setActiveOption(-2); }}
+                      onKeyDown={handleLocationKeyDown}
                       className="w-full px-3 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-900 dark:text-white text-base sm:text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 disabled:opacity-50 transition-colors pr-8"
                     />
                     {locationId && !showLocationDropdown && (
                       <button
+                        type="button"
                         onClick={() => { onLocationChange(''); setLocationSearch(''); }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                        aria-label="Clear location"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 rounded"
+                        aria-label="Clear selected location"
                       >
-                        <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current" aria-hidden="true"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                       </button>
                     )}
                   </div>
                   {/* Near me button */}
                   {distances && distances.size > 0 && (
                     <button
+                      type="button"
                       onClick={() => onNearMeChange(!nearMeOnly)}
+                      aria-pressed={nearMeOnly}
                       className={`shrink-0 w-10 h-10 sm:w-8 sm:h-8 rounded-lg border flex items-center justify-center transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                         nearMeOnly
                           ? 'bg-emerald-500 border-emerald-500 text-white shadow-lg shadow-emerald-500/30'
                           : 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600'
                       }`}
                       title={nearMeOnly ? 'Showing nearby only · tap to show all' : 'Show nearby venues only'}
-                      aria-label="Near me filter"
+                      aria-label={`Show only venues within 10 km${nearMeOnly ? ' (on)' : ''}`}
                     >
-                      <svg viewBox="0 0 24 24" className={`w-4 h-4 fill-current ${nearMeOnly ? '' : 'text-slate-600 dark:text-slate-300'}`}>
+                      <svg viewBox="0 0 24 24" className={`w-4 h-4 fill-current ${nearMeOnly ? '' : 'text-slate-600 dark:text-slate-300'}`} aria-hidden="true">
                         <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0013 3.06V1h-2v2.06A8.994 8.994 0 003.06 11H1v2h2.06A8.994 8.994 0 0011 20.94V23h2v-2.06A8.994 8.994 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>
                       </svg>
                     </button>
                   )}
                 </div>
 
-                {/* Dropdown results */}
+                {/* Result count for screen readers — the visible list conveys
+                    this by simply changing, which announces nothing. */}
+                <span className="sr-only" role="status">
+                  {showLocationDropdown
+                    ? `${filteredLocations.length} ${filteredLocations.length === 1 ? 'location' : 'locations'} available`
+                    : ''}
+                </span>
+
+                {/* Dropdown results. Options are divs with role="option":
+                    buttons inside a listbox are not a valid combination, and
+                    keyboard users drive this from the input via
+                    aria-activedescendant rather than by tabbing 59 stops. */}
                 {showLocationDropdown && (
-                  <div className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl">
-                    <button
-                      onClick={() => { onLocationChange(''); setShowLocationDropdown(false); setLocationSearch(''); }}
-                      className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-700 ${
+                  <div
+                    id="location-listbox"
+                    role="listbox"
+                    aria-label="Locations"
+                    ref={listboxRef}
+                    className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl"
+                  >
+                    <div
+                      id="location-option--1"
+                      data-option-index={-1}
+                      role="option"
+                      aria-selected={!locationId}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => selectLocation('')}
+                      onMouseEnter={() => setActiveOption(-1)}
+                      className={`cursor-pointer px-3 py-2.5 text-sm transition-colors ${
+                        activeOption === -1 ? 'bg-slate-100 dark:bg-slate-700' : ''
+                      } ${
                         !locationId ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       All Locations
-                    </button>
-                    {filteredLocations.map(loc => {
+                    </div>
+                    {filteredLocations.map((loc, index) => {
                       const dist = distances?.get(loc.location_id);
                       const parl = locationDetails?.get(loc.location_id)?.parliment_name;
                       return (
-                        <button
+                        <div
                           key={loc.location_id}
-                          onClick={() => { onLocationChange(loc.location_id); setShowLocationDropdown(false); setLocationSearch(''); }}
-                          className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-700 border-t border-slate-100 dark:border-slate-700/50 ${
+                          id={`location-option-${index}`}
+                          data-option-index={index}
+                          role="option"
+                          aria-selected={locationId === loc.location_id}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectLocation(loc.location_id)}
+                          onMouseEnter={() => setActiveOption(index)}
+                          className={`cursor-pointer px-3 py-2.5 text-sm transition-colors border-t border-slate-100 dark:border-slate-700/50 ${
+                            activeOption === index ? 'bg-slate-100 dark:bg-slate-700' : ''
+                          } ${
                             locationId === loc.location_id ? 'text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50/50 dark:bg-emerald-900/20' : 'text-slate-700 dark:text-slate-300'
                           }`}
                         >
@@ -384,7 +503,7 @@ export function FilterBar({
                               {[parl, dist?.formatted].filter(Boolean).join(' · ')}
                             </span>
                           )}
-                        </button>
+                        </div>
                       );
                     })}
                     {filteredLocations.length === 0 && (
@@ -402,15 +521,17 @@ export function FilterBar({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
             {/* Min Consecutive Slots */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              <label htmlFor="filter-min-hours" id="min-hours-label" className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                 Min Consecutive Hours
               </label>
               <div className="flex items-center gap-2">
-                <div className="flex gap-2 flex-1">
+                <div className="flex gap-2 flex-1" role="group" aria-labelledby="min-hours-label">
                   {[1, 2, 3, 4].map(n => (
                     <button
                       key={n}
+                      type="button"
                       onClick={() => onMinSlotsChange(n)}
+                      aria-pressed={minConsecutiveSlots === n}
                       className={`flex-1 py-2.5 min-h-[44px] sm:min-h-0 rounded-xl text-sm font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                         minConsecutiveSlots === n
                           ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
@@ -422,6 +543,7 @@ export function FilterBar({
                   ))}
                 </div>
                 <input
+                  id="filter-min-hours"
                   type="number"
                   min="1"
                   max={HOUR_COUNT}
@@ -434,15 +556,17 @@ export function FilterBar({
 
             {/* Min Courts Needed */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+              <label htmlFor="filter-min-courts" id="min-courts-label" className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                 Min Courts Needed
               </label>
               <div className="flex items-center gap-2">
-                <div className="flex gap-2 flex-1">
+                <div className="flex gap-2 flex-1" role="group" aria-labelledby="min-courts-label">
                   {[1, 2, 3, 4, 5, 6].map(n => (
                     <button
                       key={n}
+                      type="button"
                       onClick={() => onMinCourtsChange(n)}
+                      aria-pressed={minCourtsNeeded === n}
                       className={`flex-1 py-2.5 min-h-[44px] sm:min-h-0 rounded-xl text-sm font-bold transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                         minCourtsNeeded === n
                           ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
@@ -454,6 +578,7 @@ export function FilterBar({
                   ))}
                 </div>
                 <input
+                  id="filter-min-courts"
                   type="number"
                   min="1"
                   max={MAX_COURTS_NEEDED}
@@ -471,12 +596,13 @@ export function FilterBar({
           {/* Row 3: Time range picker */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              <span id="time-window-label" className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 Time Window
-              </label>
+              </span>
               <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{rangeLabel}</span>
               {(timeRangeStart || timeRangeEnd) && (
                 <button
+                  type="button"
                   onClick={() => onTimeRangeChange(null, null)}
                   className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors ml-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 rounded"
                 >
@@ -484,14 +610,17 @@ export function FilterBar({
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap gap-2 sm:gap-1.5">
+            <div className="flex flex-wrap gap-2 sm:gap-1.5" role="group" aria-labelledby="time-window-label">
               {PICKER_SLOTS.map(time => {
                 const inRange = isInRange(time);
                 const endpoint = isEndpoint(time);
                 return (
                   <button
                     key={time}
+                    type="button"
                     onClick={() => handleTimeClick(time)}
+                    aria-pressed={inRange}
+                    aria-label={time}
                     className={`px-2.5 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-lg text-sm sm:text-xs font-semibold transition-all select-none active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 ${
                       endpoint
                         ? 'bg-orange-500 text-white shadow-md shadow-orange-500/40 scale-105'
@@ -509,7 +638,7 @@ export function FilterBar({
               Tap a time to set start · tap another to set end · tap endpoint to adjust
             </p>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
