@@ -211,21 +211,35 @@ export function TimelineView({
   // Use desktop grid layout when screen is wide enough OR in landscape orientation
   const useDesktopGrid = isSmUp || isLandscape;
 
-  // On mobile portrait: no venue column, slots use full width with no min-width constraint
-  const timelineGridTemplate = useMemo(
-    () =>
-      useDesktopGrid
-        ? `${VENUE_COLUMN_WIDTH}px repeat(${allTimeSlotIds.length}, minmax(${TIME_COLUMN_MIN_WIDTH}px, 1fr))`
-        : `repeat(${allTimeSlotIds.length}, 1fr)`,
-    [allTimeSlotIds.length, useDesktopGrid],
-  );
-  const timelineMinWidth = useMemo(
-    () =>
-      useDesktopGrid
-        ? VENUE_COLUMN_WIDTH + allTimeSlotIds.length * TIME_COLUMN_MIN_WIDTH
-        : 0,
-    [allTimeSlotIds.length, useDesktopGrid],
-  );
+  /*
+    On a phone in portrait there is no venue column and roughly 325px to share.
+    Across the whole day that is about 20px per hour — under the 24px minimum for
+    a touch target, so tapping the 8 PM cell regularly opened 7 PM instead.
+    Splitting the day in half doubles each cell to around 40px. Every hour still
+    shows; the day is stacked rather than squeezed.
+  */
+  const segments = useMemo(() => {
+    if (useDesktopGrid || allTimeSlotIds.length <= 8) {
+      return [{ from: 0, to: allTimeSlotIds.length }];
+    }
+    const mid = Math.ceil(allTimeSlotIds.length / 2);
+    return [
+      { from: 0, to: mid },
+      { from: mid, to: allTimeSlotIds.length },
+    ];
+  }, [allTimeSlotIds.length, useDesktopGrid]);
+
+  const isSplit = segments.length > 1;
+
+  const columnsTemplate = (count: number) =>
+    useDesktopGrid
+      ? `${VENUE_COLUMN_WIDTH}px repeat(${count}, minmax(${TIME_COLUMN_MIN_WIDTH}px, 1fr))`
+      : `repeat(${count}, 1fr)`;
+
+  const timelineGridTemplate = columnsTemplate(allTimeSlotIds.length);
+  const timelineMinWidth = useDesktopGrid
+    ? VENUE_COLUMN_WIDTH + allTimeSlotIds.length * TIME_COLUMN_MIN_WIDTH
+    : 0;
 
   // Early returns after all hooks
   if (error) {
@@ -393,36 +407,32 @@ export function TimelineView({
           available width on wide screens and shrink no smaller than 32px on narrow ones.
           The header and every CourtRow use the EXACT same template — perfect alignment guaranteed.
         */}
-          <div
-            className="sticky top-[65px] sm:top-[73px] z-20 border-b border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-950/95 px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_24px_rgba(2,6,23,0.45)] backdrop-blur-sm"
-            style={{
-              display: "grid",
-              gridTemplateColumns: timelineGridTemplate,
-            }}
-          >
-            {useDesktopGrid && (
-              <div className="pr-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-500 sticky-left bg-white/95 dark:bg-slate-950/95">
-                Venue
-              </div>
-            )}
-            {allTimeSlots.map((slot) => (
-              <div
-                key={slot}
-                className={`text-center text-xs font-medium ${
-                  timeRangeStart || timeRangeEnd
-                    ? isInTimeRange(slot, timeRangeStart, timeRangeEnd)
-                      ? "text-orange-600 dark:text-orange-400"
-                      : "text-slate-400 dark:text-slate-600"
-                    : "text-slate-600 dark:text-slate-400"
-                }`}
-              >
-                {/* Always keep the a/p suffix: without it 8, 9, 10 and 11 each
-                    appear twice in the same header with nothing to tell morning
-                    from night. */}
-                {shortTimeLabel(slot)}
-              </div>
-            ))}
-          </div>
+          {/* One sticky header when the day is drawn in a single run. When it is
+              split for phones each half carries its own header instead, beside
+              the rows it labels. */}
+          {!isSplit && (
+            <div
+              className="sticky top-[65px] sm:top-[73px] z-20 border-b border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-950/95 px-3 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_24px_rgba(2,6,23,0.45)] backdrop-blur-sm"
+              style={{
+                display: "grid",
+                gridTemplateColumns: timelineGridTemplate,
+              }}
+            >
+              {useDesktopGrid && (
+                <div className="pr-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-500 sticky-left bg-white/95 dark:bg-slate-950/95">
+                  Venue
+                </div>
+              )}
+              {allTimeSlots.map((slot) => (
+                <HourLabel
+                  key={slot}
+                  slot={slot}
+                  timeRangeStart={timeRangeStart}
+                  timeRangeEnd={timeRangeEnd}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Location groups */}
           <div className="divide-y divide-slate-200 dark:divide-slate-700/50 pt-2">
@@ -532,20 +542,44 @@ export function TimelineView({
                     </div>
                   </div>
 
-                  {/* Courts */}
+                  {/* Courts, once per segment of the day */}
                   {!isCollapsed && (
-                    <div id={`venue-courts-${locId}`} className="px-3 py-1.5 space-y-0.5">
-                      {locationCourts.map((court) => (
-                        <CourtRow
-                          key={court.id}
-                          venueName={court.venue_name}
-                          slots={court.location_facility_times}
-                          isDimmed={showDimmed && !passingIds.has(court.id)}
-                          timeSlotIds={allTimeSlotIds}
-                          venueColWidth={VENUE_COLUMN_WIDTH}
-                          showVenueColumn={useDesktopGrid}
-                          bookingUrl={bookingUrl}
-                        />
+                    <div id={`venue-courts-${locId}`} className="px-3 py-1.5 space-y-3">
+                      {segments.map((segment) => (
+                        <div key={segment.from} className="space-y-0.5">
+                          {isSplit && (
+                            <div
+                              className="pb-0.5"
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: columnsTemplate(segment.to - segment.from),
+                              }}
+                            >
+                              {allTimeSlots.slice(segment.from, segment.to).map((slot) => (
+                                <HourLabel
+                                  key={slot}
+                                  slot={slot}
+                                  timeRangeStart={timeRangeStart}
+                                  timeRangeEnd={timeRangeEnd}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {locationCourts.map((court) => (
+                            <CourtRow
+                              key={court.id}
+                              venueName={court.venue_name}
+                              slots={court.location_facility_times}
+                              isDimmed={showDimmed && !passingIds.has(court.id)}
+                              timeSlotIds={allTimeSlotIds}
+                              fromCol={segment.from}
+                              toCol={segment.to}
+                              venueColWidth={VENUE_COLUMN_WIDTH}
+                              showVenueColumn={useDesktopGrid}
+                              bookingUrl={bookingUrl}
+                            />
+                          ))}
+                        </div>
                       ))}
                     </div>
                   )}
@@ -587,6 +621,35 @@ export function TimelineView({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+interface HourLabelProps {
+  slot: string;
+  timeRangeStart: string | null;
+  timeRangeEnd: string | null;
+}
+
+// One column heading. Shared by the sticky header and, when the day is split
+// for phones, by each half's own heading row, so the two cannot diverge.
+function HourLabel({ slot, timeRangeStart, timeRangeEnd }: HourLabelProps) {
+  const inWindow =
+    (timeRangeStart || timeRangeEnd) &&
+    isInTimeRange(slot, timeRangeStart, timeRangeEnd);
+  return (
+    <div
+      className={`text-center text-xs font-medium ${
+        timeRangeStart || timeRangeEnd
+          ? inWindow
+            ? "text-orange-600 dark:text-orange-400"
+            : "text-slate-400 dark:text-slate-600"
+          : "text-slate-600 dark:text-slate-400"
+      }`}
+    >
+      {/* Always keep the a/p suffix: without it 8, 9, 10 and 11 each appear
+          twice in the same header with nothing to tell morning from night. */}
+      {shortTimeLabel(slot)}
     </div>
   );
 }
