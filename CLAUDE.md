@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install        # Install dependencies
 npm run dev        # Development server at localhost:5173
 npm run typecheck  # TypeScript check only (tsc --build, no emit)
+npm test           # Vitest, single run
+npm run test:watch # Vitest in watch mode
 npm run build      # Type-check, then production build to dist/
 npm run preview    # Preview production build
 npm run lint       # ESLint checks
@@ -15,7 +17,7 @@ npm run lint       # ESLint checks
 
 `npm run build` runs `tsc --build` first, so a type error fails the build before Vite runs. Vite itself only transpiles and would not catch one.
 
-No test framework is configured in this project.
+Tests run on Vitest. `src/utils/consecutiveSlots.test.ts` covers the availability logic — the module where every correctness bug in this project has been found, because it has to reconcile DBKL's overlapping and sometimes contradictory slot records. Its cases come from shapes the live API actually returns, so add a case there whenever the API surprises you rather than only fixing the symptom.
 
 ## Architecture
 

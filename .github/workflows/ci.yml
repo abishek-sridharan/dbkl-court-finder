@@ -33,6 +33,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Test
+        run: npm test
+
       # `build` runs `tsc --build` before Vite, so this is the type-check gate
       # as well as proof that the app still compiles.
       - name: Type-check and build
