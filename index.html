@@ -32,8 +32,11 @@
           // No matchMedia; stay light.
         }
         try {
+          // Only 'light' and 'dark' override the OS. 'system' — and a missing
+          // key, and anything unrecognised — mean follow it.
           var stored = localStorage.getItem('theme');
-          if (stored) isDark = stored === 'dark';
+          if (stored === 'dark') isDark = true;
+          else if (stored === 'light') isDark = false;
         } catch (e) {
           // Storage unavailable — keep the OS preference rather than forcing light.
         }
