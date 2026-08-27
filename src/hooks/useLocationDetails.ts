@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { isValidMalaysiaCoord } from '../utils/distance';
 import { geocodeByName } from '../utils/geocoding';
 
@@ -127,13 +127,26 @@ async function fetchLocationDetail(locationId: string): Promise<LocationDetail |
 export function useLocationDetails(locationIds: string[]): Map<string, LocationDetail> {
   const [details, setDetails] = useState<Map<string, LocationDetail>>(() => toDetails(memCache));
 
+  /*
+    Re-derive the id list from its own contents so the effect below depends on
+    something that only changes when the ids actually do.
+
+    It cannot depend on `locationIds` itself: callers rebuild that array freely,
+    and a fresh identity on every render would re-run the effect, whose cleanup
+    cancels the in-flight batch loop — so with anything left to fetch it would
+    restart forever and never finish. Location ids are numeric strings, so the
+    round-trip through a comma-joined key is lossless.
+  */
+  const idsKey = locationIds.join(',');
+  const ids = useMemo(() => (idsKey ? idsKey.split(',') : []), [idsKey]);
+
   useEffect(() => {
-    if (locationIds.length === 0) return;
+    if (ids.length === 0) return;
 
     let cancelled = false;
 
     const now = Date.now();
-    const missingIds = locationIds.filter(id => {
+    const missingIds = ids.filter(id => {
       const entry = memCache.get(id);
       return !entry || isExpired(entry, now);
     });
@@ -170,7 +183,7 @@ export function useLocationDetails(locationIds: string[]): Map<string, LocationD
 
     fetchMissing();
     return () => { cancelled = true; };
-  }, [locationIds.join(',')]); // stable dependency: join the ids into a string
+  }, [ids]);
 
   return details;
 }
