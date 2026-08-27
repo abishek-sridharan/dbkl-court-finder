@@ -117,7 +117,10 @@ function buildHourAvailability(times: LocationFacilityTime[]): boolean[] {
       hour++;
       continue;
     }
-    const span = Math.min(slotSpan(slot), HOUR_COUNT - hour);
+    // Always advance. slotSpan is contracted to return at least 1, but this
+    // loop is the one place where breaking that contract would hang the tab
+    // rather than merely show something wrong, so it does not rely on it.
+    const span = Math.max(1, Math.min(slotSpan(slot), HOUR_COUNT - hour));
     if (slot.slot_available) {
       for (let h = hour; h < hour + span; h++) hours[h] = true;
     }

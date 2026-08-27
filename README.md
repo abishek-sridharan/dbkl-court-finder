@@ -52,7 +52,8 @@ Browse availability for 11 sport categories:
 | Styling    | Tailwind CSS 4                                                |
 | Fonts      | Outfit (headings), Inter (body) via Google Fonts              |
 | APIs       | DBKL Public API, OpenStreetMap Nominatim (geocoding fallback) |
-| CI         | GitHub Actions — lint, type-check and build on every PR       |
+| Testing    | Vitest                                                        |
+| CI         | GitHub Actions — lint, test, type-check and build on every PR  |
 
 ## Getting Started
 
@@ -82,6 +83,8 @@ The app will be available at `http://localhost:5173/`.
 ```bash
 npm run dev        # Development server with HMR
 npm run typecheck  # TypeScript check only (tsc --build, no emit)
+npm test           # Run the test suite once (Vitest)
+npm run test:watch # Re-run tests on change
 npm run build      # Type-check, then production build to dist/
 npm run preview    # Preview the production build locally
 npm run lint       # Run ESLint checks
