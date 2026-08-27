@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import './App.css';
 import { FilterBar } from './components/FilterBar';
 import { TimelineView } from './components/TimelineView';
@@ -11,6 +11,7 @@ import { useLocationDetails } from './hooks/useLocationDetails';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { haversineKm, formatDistance, roadDistanceKm } from './utils/distance';
 import { todayLocalIso } from './utils/date';
+import { buildFilterQuery, parseFilterState } from './utils/urlState';
 import { clearFacilityCache } from './utils/facilityCache';
 import { HOUR_COUNT, timeIndex } from './utils/consecutiveSlots';
 import { SPORT_OPTIONS } from './types';
@@ -22,10 +23,19 @@ const NEAR_ME_MAX_KM = 10;
 function App() {
   const isSmUp = useMediaQuery('(min-width: 640px)');
 
-  const [sport, setSportRaw] = useState<SportCategory>('BADMINTON');
-  const [date, setDate] = useState(todayLocalIso);
-  const [locationId, setLocationId] = useState('');
-  const [nearMeOnly, setNearMeOnly] = useState(false);
+  /*
+    Filters are seeded from the query string so any view can be bookmarked or
+    shared and comes back exactly as it was sent. `today` is captured once:
+    reading it per render would make the URL's date bounds shift under a tab
+    left open past midnight.
+  */
+  const [today] = useState(todayLocalIso);
+  const [initial] = useState(() => parseFilterState(window.location.search, todayLocalIso()));
+
+  const [sport, setSportRaw] = useState<SportCategory>(initial.sport);
+  const [date, setDate] = useState(initial.date);
+  const [locationId, setLocationId] = useState(initial.locationId);
+  const [nearMeOnly, setNearMeOnly] = useState(initial.nearMeOnly);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Reset location when sport changes — previous location may not offer the new sport
@@ -33,10 +43,10 @@ function App() {
     setSportRaw(newSport);
     setLocationId('');
   }, []);
-  const [minConsecutiveSlots, setMinConsecutiveSlots] = useState(2);
-  const [minCourtsNeeded, setMinCourtsNeeded] = useState(1);
-  const [timeRangeStart, setTimeRangeStart] = useState<string | null>(null);
-  const [timeRangeEnd, setTimeRangeEnd] = useState<string | null>(null);
+  const [minConsecutiveSlots, setMinConsecutiveSlots] = useState(initial.minConsecutiveSlots);
+  const [minCourtsNeeded, setMinCourtsNeeded] = useState(initial.minCourtsNeeded);
+  const [timeRangeStart, setTimeRangeStart] = useState<string | null>(initial.timeRangeStart);
+  const [timeRangeEnd, setTimeRangeEnd] = useState<string | null>(initial.timeRangeEnd);
 
   /*
     The time range moves as one value, not two.
@@ -67,6 +77,43 @@ function App() {
     },
     [],
   );
+
+  /*
+    Mirror the filters back into the address bar so the URL always describes what
+    is on screen — copy it at any moment and it reopens this exact view.
+
+    replaceState, not pushState: filters change constantly as people tap through
+    hours and venues, and a history entry per tap would make Back unusable.
+  */
+  useEffect(() => {
+    const query = buildFilterQuery(
+      {
+        sport,
+        date,
+        locationId,
+        nearMeOnly,
+        minConsecutiveSlots,
+        minCourtsNeeded,
+        timeRangeStart,
+        timeRangeEnd,
+      },
+      today,
+    );
+    const next = `${window.location.pathname}${query ? `?${query}` : ''}`;
+    if (next !== window.location.pathname + window.location.search) {
+      window.history.replaceState(null, '', next);
+    }
+  }, [
+    sport,
+    date,
+    locationId,
+    nearMeOnly,
+    minConsecutiveSlots,
+    minCourtsNeeded,
+    timeRangeStart,
+    timeRangeEnd,
+    today,
+  ]);
 
   // Refresh must drop the cache first, or the refetch would just serve the same
   // cached courts back and the button would appear to do nothing.
