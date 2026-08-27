@@ -1,34 +1,54 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export type Theme = 'light' | 'dark';
+/** What the user asked for, which is not always a colour: "system" defers. */
+export type ThemePreference = Theme | 'system';
 
 interface UseThemeReturn {
+  /** The theme actually applied right now. */
   theme: Theme;
-  setTheme: (theme: Theme) => void;
-  toggle: () => void;
+  preference: ThemePreference;
+  setPreference: (preference: ThemePreference) => void;
+  /** light → dark → system → light */
+  cycle: () => void;
 }
 
 const STORAGE_KEY = 'theme';
+const CYCLE: ThemePreference[] = ['light', 'dark', 'system'];
 
-function readInitialTheme(): Theme {
-  // The FOUC-prevention script in index.html already set the dark class on <html>
-  // before React mounts. Source of truth on first render is the actual class.
-  if (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) {
-    return 'dark';
+/*
+  Stored values are 'light', 'dark' or 'system'. A missing key also means
+  system, so anyone who never touched the toggle keeps following their OS, and
+  anyone who set light or dark before this existed keeps that choice.
+*/
+function readPreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+  } catch {
+    // Storage unavailable — fall through to system.
   }
-  return 'light';
+  return 'system';
+}
+
+function readSystemTheme(): Theme {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
 }
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
   root.classList.toggle('dark', theme === 'dark');
 
-  // Keep the browser's own chrome in step with the toggle. index.html carries a
+  // Keep the browser's own chrome in step with the page. index.html carries a
   // single theme-color tag rather than a prefers-color-scheme pair, because
-  // those follow the OS and would contradict the page once the user overrides
-  // the theme. Reading --color-bg-base back after the class change keeps the
-  // tint tied to the actual page background instead of a second copy of the
-  // hex values that could drift from it.
+  // those follow the OS and would contradict the page whenever the user
+  // overrides it. Reading --color-bg-base back after the class change keeps the
+  // tint tied to the actual background instead of a second copy of the hex
+  // values that could drift from it.
   const meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) return;
   const background = getComputedStyle(root).getPropertyValue('--color-bg-base').trim();
@@ -36,36 +56,40 @@ function applyTheme(theme: Theme) {
 }
 
 export function useTheme(): UseThemeReturn {
-  const [theme, setThemeState] = useState<Theme>(readInitialTheme);
+  const [preference, setPreferenceState] = useState<ThemePreference>(readPreference);
+  const [systemTheme, setSystemTheme] = useState<Theme>(readSystemTheme);
 
-  // Apply on every change.
+  const theme: Theme = preference === 'system' ? systemTheme : preference;
+
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  // Follow system preference changes — but only when the user has not set an override.
+  /*
+    Track the OS setting continuously and let `preference` decide whether it is
+    used. The previous version instead ignored the event whenever anything was
+    stored, which made an explicit choice permanent — there was no value that
+    meant "go back to following the system".
+  */
   useEffect(() => {
-    const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => {
-      if (localStorage.getItem(STORAGE_KEY)) return; // user has chosen explicitly
-      setThemeState(e.matches ? 'dark' : 'light');
-    };
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? 'dark' : 'light');
+    query.addEventListener('change', handler);
+    return () => query.removeEventListener('change', handler);
   }, []);
 
-  const setTheme = useCallback((next: Theme) => {
+  const setPreference = useCallback((next: ThemePreference) => {
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      // ignore — storage may be disabled
+      // Storage may be disabled; the choice still applies for this session.
     }
-    setThemeState(next);
+    setPreferenceState(next);
   }, []);
 
-  const toggle = useCallback(() => {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
-  }, [theme, setTheme]);
+  const cycle = useCallback(() => {
+    setPreference(CYCLE[(CYCLE.indexOf(preference) + 1) % CYCLE.length]);
+  }, [preference, setPreference]);
 
-  return { theme, setTheme, toggle };
+  return { theme, preference, setPreference, cycle };
 }
