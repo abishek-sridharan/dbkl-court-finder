@@ -53,6 +53,7 @@ Browse availability for 11 sport categories:
 | Fonts      | Outfit (headings), Inter (body) via Google Fonts              |
 | APIs       | DBKL Public API, OpenStreetMap Nominatim (geocoding fallback) |
 | Testing    | Vitest                                                        |
+| Snapshots  | GitHub Actions cron → orphan `data` branch                    |
 | CI         | GitHub Actions — lint, test, type-check and build on every PR  |
 
 ## Getting Started
