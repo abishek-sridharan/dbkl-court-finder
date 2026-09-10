@@ -2,10 +2,12 @@ name: Snapshot DBKL availability
 
 on:
   schedule:
-    # Every 30 minutes. GitHub treats schedules as best-effort and often runs
-    # them late under load, which is fine: the app always refreshes live on top
-    # of whatever the snapshot gave it.
-    - cron: '*/30 * * * *'
+    # Hourly. A full two-date sweep takes ~20 minutes from CI at this pacing, so
+    # a 30-minute cadence would leave almost no headroom. Age costs little: the
+    # snapshot exists to make the first paint instant, and anything past the
+    # cache TTL is refetched live anyway, so an older snapshot means more
+    # venues refreshed — not staler data on screen.
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 # Actions defaults to read-only on this repo, and the job pushes.
@@ -36,8 +38,11 @@ jobs:
       # single-commit branch keeps the repo flat and decouples data from deploys.
       - name: Publish to the data branch
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # --global: these run before `git init` below, and a repo-local
+          # `git config` would land on the checked-out repo rather than the
+          # fresh one, leaving it with no author and failing the commit.
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p /tmp/publish/snapshot
           cp snapshot/badminton.json /tmp/publish/snapshot/
           cd /tmp/publish
