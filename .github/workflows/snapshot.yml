@@ -1,0 +1,48 @@
+name: Snapshot DBKL availability
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub treats schedules as best-effort and often runs
+    # them late under load, which is fine: the app always refreshes live on top
+    # of whatever the snapshot gave it.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+# Actions defaults to read-only on this repo, and the job pushes.
+permissions:
+  contents: write
+
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sweep DBKL
+        run: node scripts/snapshot.mjs --days 2 --out snapshot/badminton.json
+
+      # Published to an orphan branch that is replaced each run, not appended to.
+      # A ~100 KB file rewritten 48 times a day would add gigabytes to main's
+      # history within a year and trigger a redeploy every time; force-pushing a
+      # single-commit branch keeps the repo flat and decouples data from deploys.
+      - name: Publish to the data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p /tmp/publish/snapshot
+          cp snapshot/badminton.json /tmp/publish/snapshot/
+          cd /tmp/publish
+          git init -q -b data
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git add -A
+          git commit -q -m "snapshot: $(date -u +'%Y-%m-%dT%H:%MZ')"
+          git push -q --force origin data

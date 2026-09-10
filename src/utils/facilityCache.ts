@@ -51,6 +51,38 @@ export function readFacility(
   return entry.courts;
 }
 
+/**
+ * Cached courts regardless of age — for showing something immediately while a
+ * fresh copy is on its way. Callers must still refetch anything this returns
+ * that `readFacility` rejected, or stale data would never correct itself.
+ */
+export function readStaleFacility(
+  sport: SportCategory,
+  date: string,
+  locationId: string
+): LocationFacility[] | null {
+  return cache.get(cacheKey(sport, date, locationId))?.courts ?? null;
+}
+
+/**
+ * Seed from a pre-swept snapshot, carrying the time it was actually taken.
+ * Using the real sweep time rather than "now" is what makes the entry read as
+ * stale to readFacility, so it is displayed but still refetched.
+ */
+export function seedFacility(
+  sport: SportCategory,
+  date: string,
+  locationId: string,
+  courts: LocationFacility[],
+  fetchedAt: number
+): void {
+  const key = cacheKey(sport, date, locationId);
+  const existing = cache.get(key);
+  // Never let a snapshot overwrite something fetched more recently.
+  if (existing && existing.fetchedAt >= fetchedAt) return;
+  cache.set(key, { courts, fetchedAt });
+}
+
 export function writeFacility(
   sport: SportCategory,
   date: string,

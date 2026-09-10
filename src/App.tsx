@@ -9,6 +9,7 @@ import { useAllFacilities } from './hooks/useAllFacilities';
 import { useUserLocation } from './hooks/useUserLocation';
 import { useLocationDetails } from './hooks/useLocationDetails';
 import { useMediaQuery } from './hooks/useMediaQuery';
+import { useSnapshotSeed } from './hooks/useSnapshotSeed';
 import { haversineKm, formatDistance, roadDistanceKm } from './utils/distance';
 import { todayLocalIso } from './utils/date';
 import { buildFilterQuery, parseFilterState } from './utils/urlState';
@@ -126,7 +127,21 @@ function App() {
 
   const isAllLocations = locationId === '';
   const singleFacility = useFacility(isAllLocations ? null : locationId, date, sport, refreshKey);
-  const allFacilities = useAllFacilities(locations, date, isAllLocations, sport, refreshKey);
+  /*
+    Seed the cache from the published snapshot first, then sweep. The sweep is
+    gated on the attempt settling (success or failure) so it starts from seeded
+    data rather than starting empty and restarting when the snapshot arrives.
+    One CDN fetch of a ~100 KB file, against a live sweep that takes about a
+    minute.
+  */
+  const snapshot = useSnapshotSeed();
+  const allFacilities = useAllFacilities(
+    locations,
+    date,
+    isAllLocations && snapshot.ready,
+    sport,
+    refreshKey,
+  );
 
   const activeCourts = useMemo(() => {
     if (isAllLocations) {
@@ -144,8 +159,12 @@ function App() {
   // Count the venue-list fetch as loading too. Without it the all-locations hook
   // has nothing to work with yet and reports "not loading", so the "no courts
   // found" empty state flashes before the list has even arrived.
+  // Count the snapshot fetch as loading too. The sweep is gated on it, so
+  // without this the app would briefly report "not loading" with no courts yet
+  // and flash the "no courts found" empty state.
   const courtsLoading =
-    locationsLoading || (isAllLocations ? allFacilities.loading : singleFacility.loading);
+    locationsLoading ||
+    (isAllLocations ? !snapshot.ready || allFacilities.loading : singleFacility.loading);
   // A failed venue list leaves every other request with nothing to ask for, so
   // it has to surface — otherwise it reads as "no courts match your filters".
   const courtsError =

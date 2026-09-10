@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { readFacility, writeFacility } from '../utils/facilityCache';
+import { readFacility, readStaleFacility, writeFacility } from '../utils/facilityCache';
 import type { LocationFacility, LocationData, SportCategory } from '../types';
 
 interface LocationCourtGroup {
@@ -48,28 +48,43 @@ export function useAllFacilities(
     let cancelled = false;
     let failed = 0;
 
-    // Serve everything already cached before touching the network, so returning
-    // to a date visited moments ago renders instantly instead of replaying the
-    // whole multi-minute sweep behind a progress bar.
-    const groups: LocationCourtGroup[] = [];
+    /*
+      Show everything we already have before touching the network, then refresh
+      what is not current. Fresh entries are displayed and skipped; stale ones —
+      an expired cache entry, or a venue seeded from the published snapshot —
+      are displayed AND refetched, so a visitor sees the city immediately
+      instead of a multi-minute progress bar, and the numbers correct themselves
+      as the live sweep lands.
+
+      Keyed by location_id rather than appended, because a stale venue is
+      already on screen when its fresh copy arrives and must be replaced in
+      place rather than listed twice.
+    */
+    const groups = new Map<string, LocationCourtGroup>();
     const pending: LocationData[] = [];
+    let freshCount = 0;
+
     locations.forEach(loc => {
-      const cached = readFacility(sport, date, loc.location_id);
-      if (cached) {
-        groups.push({
+      const fresh = readFacility(sport, date, loc.location_id);
+      const courts = fresh ?? readStaleFacility(sport, date, loc.location_id);
+      if (courts) {
+        groups.set(loc.location_id, {
           location_id: loc.location_id,
           location_name: loc.location_name,
-          courts: cached,
+          courts,
         });
-      } else {
-        pending.push(loc);
       }
+      if (fresh) freshCount++;
+      else pending.push(loc);
     });
 
+    // Progress counts venues confirmed fresh this run, not venues on screen —
+    // otherwise seeding from a snapshot would report 100% before a single
+    // request had been made.
     const publish = () => {
-      setResults([...groups]);
-      setLoadedCount(groups.length);
-      setProgress(Math.round((groups.length / locations.length) * 100));
+      setResults([...groups.values()]);
+      setLoadedCount(freshCount);
+      setProgress(Math.round((freshCount / locations.length) * 100));
     };
 
     setError(null);
@@ -131,7 +146,13 @@ export function useAllFacilities(
           const batchResults = await Promise.all(batchPromises);
 
           if (!cancelled) {
-            batchResults.forEach(r => groups.push(r.group));
+            batchResults.forEach(r => {
+              // A failed refresh keeps whatever was already on screen: showing
+              // a venue's slightly stale slots beats blanking it to nothing.
+              if (r.failed && groups.has(r.group.location_id)) return;
+              groups.set(r.group.location_id, r.group);
+              if (!r.failed) freshCount++;
+            });
             failed += batchResults.filter(r => r.failed).length;
             setFailedCount(failed);
             publish();
