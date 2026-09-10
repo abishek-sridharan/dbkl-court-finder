@@ -45,6 +45,10 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p /tmp/publish/snapshot
           cp snapshot/badminton.json /tmp/publish/snapshot/
+          # Carried onto the data branch as well as main: Vercel's docs do not
+          # say which branch it reads this from, and a data push that builds is
+          # a guaranteed failure — the branch holds one JSON file and no app.
+          cp vercel.json /tmp/publish/
           cd /tmp/publish
           git init -q -b data
           git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
