@@ -13,8 +13,19 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const BASE = 'https://apihub.dbkl.gov.my/api/public/v1';
-const BATCH_SIZE = 10;
-const BATCH_DELAY_MS = 200;
+
+/*
+  Deliberately gentler than the app's own sweep (10 at a time, 200ms apart).
+  The app paces for someone staring at a progress bar; this job has twenty
+  minutes and nobody waiting, and DBKL throttles progressively — the first CI
+  run lost 10 venues on its first date and 26 on its second, getting worse as it
+  went. Going slower is both more reliable and better manners.
+*/
+const BATCH_SIZE = 5;
+const BATCH_DELAY_MS = 1000;
+/** One hung request would otherwise stall its whole batch: fetch has no default timeout. */
+const REQUEST_TIMEOUT_MS = 20000;
+const MAX_ATTEMPTS = 4;
 /** Bumped when the on-disk shape changes, so an old snapshot is ignored rather than misread. */
 const SNAPSHOT_VERSION = 1;
 
@@ -42,19 +53,25 @@ function klNow() {
   return new Date(Date.now() + 8 * 60 * 60 * 1000);
 }
 
-async function getJson(url, attempt = 0) {
+/**
+ * Fetch with a timeout and exponential backoff.
+ *
+ * Backoff matters more than retry count here: DBKL's throttling tightens as a
+ * sweep proceeds, so retrying immediately just spends the next rejection.
+ * Jitter keeps a batch's five retries from landing in lockstep.
+ */
+async function getJson(url, attempt = 1) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
-    // One retry: a sweep this long will meet the occasional blip, and losing a
-    // venue silently is exactly the failure the app already works to avoid.
-    if (attempt < 1) {
-      await sleep(1000);
-      return getJson(url, attempt + 1);
+    if (attempt >= MAX_ATTEMPTS) {
+      throw new Error(`${err.name === 'TimeoutError' ? 'timeout' : err.message} after ${attempt} attempts`);
     }
-    throw err;
+    const backoff = 1000 * 2 ** (attempt - 1) + Math.random() * 500;
+    await sleep(backoff);
+    return getJson(url, attempt + 1);
   }
 }
 
@@ -95,32 +112,61 @@ function slimCourt(court) {
   };
 }
 
-async function sweepDate(locations, date, sport) {
-  const venues = [];
-  let failed = 0;
+async function fetchVenue(loc, date, sport) {
+  const url =
+    `${BASE}/location/facility?sub_category=${encodeURIComponent(sport)}` +
+    `&location_id=${loc.id}&search_date=${date}`;
+  const data = await getJson(url);
+  const courts = data?.success && data?.data?.data ? data.data.data : [];
+  return { id: loc.id, n: loc.name, c: courts.map(slimCourt) };
+}
 
-  for (let i = 0; i < locations.length; i += BATCH_SIZE) {
-    const batch = locations.slice(i, i + BATCH_SIZE);
+async function sweepPass(targets, date, sport, batchSize, delayMs, reasons) {
+  const venues = [];
+  const stragglers = [];
+
+  for (let i = 0; i < targets.length; i += batchSize) {
+    const batch = targets.slice(i, i + batchSize);
     const results = await Promise.all(
       batch.map(async (loc) => {
-        const url =
-          `${BASE}/location/facility?sub_category=${encodeURIComponent(sport)}` +
-          `&location_id=${loc.id}&search_date=${date}`;
         try {
-          const data = await getJson(url);
-          const courts = data?.success && data?.data?.data ? data.data.data : [];
-          return { id: loc.id, n: loc.name, c: courts.map(slimCourt) };
-        } catch {
-          return null; // counted below; omitted so the app falls back to fetching it
+          return { ok: true, venue: await fetchVenue(loc, date, sport) };
+        } catch (err) {
+          // Recorded, not swallowed — a silent failure here is what produced a
+          // half-empty snapshot with no way to tell why.
+          reasons.set(err.message, (reasons.get(err.message) ?? 0) + 1);
+          return { ok: false, loc };
         }
       }),
     );
 
-    results.forEach((r) => (r ? venues.push(r) : failed++));
-    if (i + BATCH_SIZE < locations.length) await sleep(BATCH_DELAY_MS);
+    results.forEach((r) => (r.ok ? venues.push(r.venue) : stragglers.push(r.loc)));
+    if (i + batchSize < targets.length) await sleep(delayMs);
   }
 
-  return { venues, failed };
+  return { venues, stragglers };
+}
+
+async function sweepDate(locations, date, sport) {
+  const reasons = new Map();
+  const first = await sweepPass(locations, date, sport, BATCH_SIZE, BATCH_DELAY_MS, reasons);
+  const venues = first.venues;
+
+  // Second pass over whatever the first lost, slower and one at a time. Most
+  // stragglers are throttling rather than genuine absence, and by now the
+  // burst that caused it has passed.
+  if (first.stragglers.length > 0) {
+    console.log(`  retrying ${first.stragglers.length} venue(s) slowly`);
+    await sleep(5000);
+    const second = await sweepPass(first.stragglers, date, sport, 1, 1500, reasons);
+    venues.push(...second.venues);
+    if (second.stragglers.length > 0) {
+      const summary = [...reasons.entries()].map(([m, n]) => `${n}× ${m}`).join(', ');
+      console.log(`  still failing: ${second.stragglers.length} — ${summary}`);
+    }
+  }
+
+  return { venues, failed: locations.length - venues.length };
 }
 
 async function main() {
@@ -135,37 +181,52 @@ async function main() {
     return localIso(d);
   });
 
+  /*
+    Judged per date, not across the whole run. A sweep that lost most of one
+    date is worse than no data for it — the app would render a confidently
+    empty city — but that is no reason to discard a date that came back whole.
+    Dates below the bar are dropped and simply fall through to the live sweep.
+  */
+  const MIN_COVERAGE = 0.7;
   const byDate = {};
+  const published = [];
   let totalFailed = 0;
+
   for (const date of dates) {
     const { venues, failed } = await sweepDate(locations, date, SPORT);
-    byDate[date] = venues;
     totalFailed += failed;
-    console.log(`${date}: ${venues.length}/${locations.length} venues (${failed} failed)`);
+    const coverage = venues.length / locations.length;
+    const verdict = coverage >= MIN_COVERAGE ? 'publishing' : 'DROPPED — too incomplete';
+    console.log(
+      `${date}: ${venues.length}/${locations.length} venues ` +
+        `(${Math.round(coverage * 100)}%, ${failed} failed) — ${verdict}`,
+    );
+    if (coverage >= MIN_COVERAGE) {
+      byDate[date] = venues;
+      published.push(date);
+    }
   }
 
-  // A sweep that lost most venues is worse than no snapshot — the app would
-  // render a confidently empty city. Fail instead and keep the previous one.
-  const expected = locations.length * dates.length;
-  const got = Object.values(byDate).reduce((n, v) => n + v.length, 0);
-  if (got < expected * 0.7) {
-    throw new Error(`Only ${got}/${expected} venue-days succeeded; refusing to publish`);
+  if (published.length === 0) {
+    throw new Error('No date reached the coverage threshold; refusing to publish');
   }
 
   const snapshot = {
     version: SNAPSHOT_VERSION,
     sport: SPORT,
     generatedAt: new Date().toISOString(),
-    dates,
+    dates: published,
     byDate,
   };
 
   await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(snapshot));
   const kb = Math.round(JSON.stringify(snapshot).length / 1024);
+  const venueDays = Object.values(byDate).reduce((n, v) => n + v.length, 0);
   console.log(
-    `wrote ${OUT} — ${kb} KB, ${got}/${expected} venue-days, ` +
-      `${totalFailed} failures, ${Math.round((Date.now() - started) / 1000)}s`,
+    `wrote ${OUT} — ${kb} KB, ${published.length}/${dates.length} dates, ` +
+      `${venueDays} venue-days, ${totalFailed} failures, ` +
+      `${Math.round((Date.now() - started) / 1000)}s`,
   );
 }
 
